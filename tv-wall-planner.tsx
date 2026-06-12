@@ -369,7 +369,8 @@ const SAVED_SIZE = TV_CATALOG[SAVED_BRAND].includes(SAVED.selectedSize) ? SAVED.
 // Export carries both the editable design AND the computed numbers so
 // downstream apps can consume results without reimplementing the engine.
 const buildExportJSON = (design, layout) => ({
-  app: "tv-wall-planner",
+  app: "tv-wall-planner", // stable id — interop depends on it
+  appName: "TellaVision",
   schema: 1,
   exportedAt: new Date().toISOString(),
   design,
@@ -1827,7 +1828,7 @@ export default function App() {
       if (hasMantel) specRows.push(["Mantel top", `${fmt(mantelH)} from floor`]);
     }
     const parts = buildPartsList({ layout, showOutlet, showLowVolt });
-    const docTitle = projectName.trim() ? `${projectName.trim()} — ${brand} ${selectedSize}"` : `TV Wall Layout — ${brand} ${selectedSize}"`;
+    const docTitle = projectName.trim() ? `${projectName.trim()} — ${brand} ${selectedSize}"` : `TellaVision — ${brand} ${selectedSize}"`;
     const metaHtml = "Front Elevation · REV " + (revision || "01") + (clientName.trim() ? "<br/>" + clientName.trim() : "") + "<br/>" + today;
     const specRowsHtml = specRows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
     const partsHtml = parts.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
@@ -2191,7 +2192,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
           <button className="chip" onClick={() => setSweep(runStressSweep())} title="Render every configuration offscreen and audit for collisions">SWEEP</button>
           <button className="chip" onClick={() => {
             const report = [
-              `TV WALL PLANNER DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`,
+              `TELLAVISION DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`,
               `Self-tests: ${selfTest.passed}/${selfTest.total} ${allTestsPass ? "PASS" : "FAIL"}`,
               `Render audit: ${renderAudit.overlaps} overlaps, ${renderAudit.clipped} clipped (${renderAudit.checked} labels)`,
               sweep ? `Stress sweep: ${sweep.failures.length} failing configs / ${sweep.total}` : `Stress sweep: not run`,
@@ -2423,7 +2424,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 
       <header className="hdr">
         <div>
-          <h1>TV WALL PLANNER</h1>
+          <h1>TELL·A·VISION</h1>
           <div className="sub">BLUEPRINT EDITION · REV {revision || "01"} · FRONT ELEVATION</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>

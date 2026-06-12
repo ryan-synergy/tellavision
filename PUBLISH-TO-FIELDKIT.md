@@ -1,4 +1,4 @@
-# Publishing the TV Wall Planner to Synergy Field Kit
+# Publishing TellaVision (the TV wall planner) to Synergy Field Kit
 
 Handoff doc for the agent that maintains the Field Kit hub
 (`ryan-synergy/ryan-synergy.github.io`). The production build in this repo is
@@ -34,10 +34,12 @@ supersedes it. Recommended: swap in place so the hub URL stays stable.
      --input - <<< '{"build_type":"legacy","source":{"branch":"main","path":"/"}}'
    ```
 4. Push, wait for Pages, verify the live `<title>` is
-   **"TV Wall Planner — Synergy AV"**.
+   **"TellaVision — Synergy AV"** (production index.html sets the title at compile time — rename there too).
 5. Update the hub (`ryan-synergy/ryan-synergy.github.io`) in BOTH `index.html`
-   and `tools.json`: rename the `tvcalc` card to **"TV Wall Planner"**, desc
-   e.g. *"Blueprint Edition — rough-in drawings, PDF / DXF / JSON export"*.
+   and `tools.json`: rename the `tvcalc` card to **"TellaVision"**, desc
+   e.g. *"TV layout + tape-out — rough-in drawings, PDF / DXF / JSON export"*.
+   (Spoken, it reads "television" — that's the point. Wordmark `TellaVision`,
+   all-caps lockup `TELL·A·VISION`.)
 6. Check the service worker scope works under the `/tv-wall-calculator/`
    subpath (sw.js registration path may need the subpath prefix).
 
