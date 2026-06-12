@@ -6,7 +6,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const TV_CATALOG = {
-  Sony:    [42, 43, 48, 50, 55, 65, 75, 77, 85, 98, 100],
+  Sony:    [42, 43, 48, 50, 55, 65, 75, 77, 85, 98, 100, 115],
   Samsung: [32, 43, 50, 55, 65, 75, 77, 83, 85, 98, 100, 115],
   LG:      [42, 48, 55, 65, 77, 83, 97],
 };
@@ -74,7 +74,7 @@ const VESA_DATA = {
     85: { w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
     98: { w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
     100:{ w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
-    115:{ w_mm: 800, h_mm: 600, screw: "M8", voffset_pct: 0, note: "QN90F / Micro RGB - confirm with spec sheet; no Sanus Black mount this size" },
+    115:{ w_mm: 1000, h_mm: 600, screw: "M8", voffset_pct: 0, note: "Micro RGB - 1000x600 verified from spec sheet; screw depth 16-18mm; no Sanus Black mount this size" },
   },
   LG: {
     42: { w_mm: 300, h_mm: 200, screw: "M6", voffset_pct: -8, note: "OLED - pattern biased low" },
@@ -99,6 +99,19 @@ const CLEARANCE = { mantel: 8, noMantel: 10 };
 
 // 16:9 panel + ~1.2" bezel allowance. Constants are 16/sqrt(337), 9/sqrt(337).
 const tvDims = (size) => ({ w: size * 0.872 + 1.2, h: size * 0.490 + 1.2 });
+
+// Exact panel data from manufacturer spec sheets (set WITHOUT stand).
+// When present these REPLACE the 16:9 formula in every calculation, and
+// weightLbs feeds the mount capacity check automatically.
+const TV_OVERRIDES = {
+  Samsung: { 115: { w: 101.2, h: 58.2, d: 1.4, weightLbs: 194.0, model: '115" Micro RGB' } },
+  Sony:    { 115: { w: 101.0, h: 57.75, d: 2.5, weightLbs: 235.3, model: 'BRAVIA 9 II K115XR90M2 True RGB' } },
+};
+
+const tvDimsFor = (brand, size) => {
+  const o = TV_OVERRIDES[brand]?.[size];
+  return o ? { w: o.w, h: o.h } : tvDims(size);
+};
 
 const mmToIn = (mm) => mm / 25.4;
 
@@ -173,9 +186,9 @@ const fmtIn = (v, mode = "dec") => {
 const computeTvCL = ({ wallW, hasFireplace, fbOffsetIn, tvOffsetIn }) =>
   wallW / 2 + (hasFireplace ? fbOffsetIn : 0) + tvOffsetIn;
 
-const computeRecommendedCenterH = ({ selectedSize, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist }) => {
+const computeRecommendedCenterH = ({ selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist }) => {
   if (!selectedSize) return 42;
-  const { h: tvH } = tvDims(selectedSize);
+  const { h: tvH } = tvDimsFor(brand, selectedSize);
   if (hasFireplace && hasMantel) return mantelH + CLEARANCE.mantel + tvH / 2;
   if (hasFireplace && !hasMantel) return fbOpeningH + CLEARANCE.noMantel + tvH / 2;
   let base = 42;
@@ -184,19 +197,19 @@ const computeRecommendedCenterH = ({ selectedSize, hasFireplace, hasMantel, mant
   return base;
 };
 
-const computeCenterH = ({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize }) => {
+const computeCenterH = ({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand }) => {
   if (!mountHeightOverride) return recommendedCenterH;
   const val = parseFloat(mountHeightOverride);
   if (isNaN(val)) return recommendedCenterH;
-  if (heightRef === "bottom" && selectedSize) return val + tvDims(selectedSize).h / 2;
+  if (heightRef === "bottom" && selectedSize) return val + tvDimsFor(brand, selectedSize).h / 2;
   return val;
 };
 
 // Convert a height override between center- and bottom-reference, preserving
 // the physical TV position. Full precision; caller rounds for display.
-const convertOverride = (value, toRef, selectedSize) => {
+const convertOverride = (value, toRef, brand, selectedSize) => {
   if (!selectedSize || isNaN(value)) return null;
-  const half = tvDims(selectedSize).h / 2;
+  const half = tvDimsFor(brand, selectedSize).h / 2;
   return toRef === "bottom" ? value - half : value + half;
 };
 
@@ -205,7 +218,7 @@ const convertOverride = (value, toRef, selectedSize) => {
 // bar, spec panel, and PDF.
 const computeLayout = ({ selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountSystem, sanusMount }) => {
   if (!selectedSize) return null;
-  const { w: tvW, h: tvH } = tvDims(selectedSize);
+  const { w: tvW, h: tvH } = tvDimsFor(brand, selectedSize);
   const tvLeft = tvCL - tvW / 2;
   const tvRight = tvCL + tvW / 2;
   const tvTop = centerH + tvH / 2;
@@ -271,8 +284,8 @@ const computeLayout = ({ selectedSize, brand, centerH, tvCL, showBackBox, effect
 
 // Reasons a size fails the proportional/clearance guidelines (size cards +
 // warning panel). Empty array = recommended fit.
-const computeFitIssues = (sz, { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH }) => {
-  const { w, h } = tvDims(sz);
+const computeFitIssues = (sz, { brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH }) => {
+  const { w, h } = tvDimsFor(brand, sz);
   const maxByWall = wallW * 0.65;
   const minByWall = wallW * 0.35;
   const issues = [];
@@ -292,7 +305,7 @@ const computeFitIssues = (sz, { wallW, wallH, hasFireplace, hasMantel, mantelH, 
 const computeRecommendations = ({ brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist }) => {
   const sizes = TV_CATALOG[brand];
   let candidates = sizes.filter(sz =>
-    computeFitIssues(sz, { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH }).length === 0
+    computeFitIssues(sz, { brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH }).length === 0
   );
   if (useViewDist) {
     const ideal = viewDist / 1.6;
@@ -653,9 +666,9 @@ const runSelfTests = () => {
   }
   // ---- Golden case B: "Smith Residence" — fireplace +15", mantel 54", bottom override 53.5 ----
   {
-    const recommended = computeRecommendedCenterH({ selectedSize: 65, hasFireplace: true, hasMantel: true, mantelH: 54, fbOpeningH: 30, useViewDist: true, viewDist: 144 });
+    const recommended = computeRecommendedCenterH({ selectedSize: 65, brand: "Sony", hasFireplace: true, hasMantel: true, mantelH: 54, fbOpeningH: 30, useViewDist: true, viewDist: 144 });
     T("golden", "B: recommended center 78.53\" (mantel 54 + 8 + h/2)", approx(recommended, 78.525), `rec=${recommended.toFixed(3)}`);
-    const centerH = computeCenterH({ mountHeightOverride: "53.5", heightRef: "bottom", recommendedCenterH: recommended, selectedSize: 65 });
+    const centerH = computeCenterH({ mountHeightOverride: "53.5", heightRef: "bottom", recommendedCenterH: recommended, selectedSize: 65, brand: "Sony" });
     T("golden", "B: override 53.5 bottom → center 70.03", approx(centerH, 70.025), `center=${centerH.toFixed(3)}`);
     const tvCL = computeTvCL({ wallW: 120, hasFireplace: true, fbOffsetIn: 15, tvOffsetIn: 0 });
     T("golden", "B: TV CL 75.0\" (follows fireplace)", approx(tvCL, 75));
@@ -675,6 +688,25 @@ const runSelfTests = () => {
     const L = computeLayout({ selectedSize: 100, brand: "Sony", centerH: 50, tvCL: 60, showBackBox: true, effectiveBoxModel: recommendBackBox(100, "fa", "Sony"), mountSystem: "fa", sanusMount: null });
     return L.box.model === "FA-WB80" && L.box.underRated;
   })());
+  // ---- Golden: spec-sheet panel overrides (115" RGB class) ----
+  T("golden", "Samsung 115 Micro RGB exact dims 101.2 × 58.2", (() => {
+    const d = tvDimsFor("Samsung", 115);
+    return d.w === 101.2 && d.h === 58.2;
+  })());
+  T("golden", "Sony 115 BRAVIA 9 II exact dims 101.0 × 57.75, 235.3 lbs", (() => {
+    const d = tvDimsFor("Sony", 115);
+    return d.w === 101.0 && d.h === 57.75 && TV_OVERRIDES.Sony[115].weightLbs === 235.3;
+  })());
+  T("golden", "Samsung 115 VESA corrected to 1000×600 M8", VESA_DATA.Samsung[115].w_mm === 1000 && VESA_DATA.Samsung[115].h_mm === 600 && VESA_DATA.Samsung[115].screw === "M8");
+  T("golden", "Sony 115 has NO VESA entry (spec sheet lacks it — never guess)", !VESA_DATA.Sony[115]);
+  T("golden", "Layout uses exact dims: Samsung 115 @ center 50 → top 79.1", (() => {
+    const L = computeLayout({ selectedSize: 115, brand: "Samsung", centerH: 50, tvCL: 75, showBackBox: true, effectiveBoxModel: "SB-RBX-PRO-XL", mountSystem: "sanus", sanusMount: null });
+    return approx(L.tvTop, 50 + 29.1) && approx(L.tvW, 101.2);
+  })());
+  T("invariant", "Every TV_OVERRIDES entry exists in the catalog", (() =>
+    Object.entries(TV_OVERRIDES).every(([b, sizes]) => Object.keys(sizes).every(sz => TV_CATALOG[b]?.includes(+sz)))
+  )());
+
   // ---- Golden: Sanus Black mount selection ----
   T("golden", "Sony 65 fixed → CILL1-B1", recommendSanusMount(65, "fixed", "Sony")?.model === "CILL1-B1");
   T("golden", "Samsung 85 full motion → CILF230-G1", recommendSanusMount(85, "fullmotion", "Samsung")?.model === "CILF230-G1");
@@ -784,16 +816,16 @@ const runSelfTests = () => {
           if (!inBox(L.outlet) || !inBox(L.lv)) { elecOK = false; detail.push(`elec: ${brand} ${sz} ${mountSystem}`); }
         }
         // override conversion round-trip
-        const there = convertOverride(50, "bottom", sz);
-        const back = convertOverride(there, "center", sz);
+        const there = convertOverride(50, "bottom", brand, sz);
+        const back = convertOverride(there, "center", brand, sz);
         if (!approx(back, 50, 1e-9)) { convOK = false; detail.push(`conv: ${sz}`); }
       });
       // recommendation ⇒ placed at recommended height, TV fits the wall
       configs.forEach(cfg => {
         const rec = computeRecommendations({ brand, wallW: 120, wallH: 108, useViewDist: false, viewDist: 144, ...cfg });
         rec.forEach(rsz => {
-          const rc = computeRecommendedCenterH({ selectedSize: rsz, useViewDist: false, viewDist: 144, ...cfg });
-          const top = rc + tvDims(rsz).h / 2;
+          const rc = computeRecommendedCenterH({ selectedSize: rsz, brand, useViewDist: false, viewDist: 144, ...cfg });
+          const top = rc + tvDimsFor(brand, rsz).h / 2;
           if (top > 108 + 1e-9) { recFitsOK = false; detail.push(`rec-fit: ${brand} ${rsz} ${cfg.name} top=${top.toFixed(1)}`); }
         });
       });
@@ -1280,7 +1312,7 @@ const sweepConfigs = () => {
   BRANDS.forEach(brand => {
     const sizes = TV_CATALOG[brand];
     const big = sizes[sizes.length - 1], small = sizes[0];
-    cfgs.push({ ...base, name: `${brand} ${big} high mount`, brand, selectedSize: big, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: false, override: String(108 - tvDims(big).h / 2 - 1) });
+    cfgs.push({ ...base, name: `${brand} ${big} high mount`, brand, selectedSize: big, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: false, override: String(108 - tvDimsFor(brand, big).h / 2 - 1) });
     cfgs.push({ ...base, name: `${brand} ${small} low mount`, brand, selectedSize: small, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false, heightRef: "bottom", override: "12" });
     cfgs.push({ ...base, name: `${brand} ${small} mobile/frac/fp`, brand, selectedSize: small, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "frac", hasFireplace: true, isMobile: true, viewportW: 375 });
   });
@@ -1316,8 +1348,8 @@ const runStressSweep = () => {
   const root = ReactDOM.createRoot(host);
   const failures = [];
   cfgs.forEach(cfg => {
-    const recommended = computeRecommendedCenterH({ selectedSize: cfg.selectedSize, hasFireplace: cfg.hasFireplace, hasMantel: cfg.hasMantel, mantelH: cfg.mantelH, fbOpeningH: cfg.fbOpeningH, useViewDist: false, viewDist: 144 });
-    const centerH = computeCenterH({ mountHeightOverride: cfg.override, heightRef: cfg.heightRef, recommendedCenterH: recommended, selectedSize: cfg.selectedSize });
+    const recommended = computeRecommendedCenterH({ selectedSize: cfg.selectedSize, brand: cfg.brand, hasFireplace: cfg.hasFireplace, hasMantel: cfg.hasMantel, mantelH: cfg.mantelH, fbOpeningH: cfg.fbOpeningH, useViewDist: false, viewDist: 144 });
+    const centerH = computeCenterH({ mountHeightOverride: cfg.override, heightRef: cfg.heightRef, recommendedCenterH: recommended, selectedSize: cfg.selectedSize, brand: cfg.brand });
     const tvCL = computeTvCL({ wallW: cfg.wallW, hasFireplace: cfg.hasFireplace, fbOffsetIn: cfg.fbOffsetIn || 0, tvOffsetIn: cfg.tvOffsetIn || 0 });
     const boxModel = recommendBackBox(cfg.selectedSize, cfg.mountSystem, cfg.brand);
     const sanusMount = cfg.mountSystem === "sanus" ? recommendSanusMount(cfg.selectedSize, cfg.sanusStyle || "fixed", cfg.brand) : null;
@@ -1494,16 +1526,16 @@ export default function App() {
   const fbOffsetIn = parseFloat(fbOffsetX) || 0;
   const tvOffsetIn = parseFloat(tvOffsetX) || 0;
   const travelIn = parseFloat(bracketTravel) || 0;
-  const engineInputs = { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist };
+  const engineInputs = { brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist };
 
   const recommendations = useMemo(() => computeRecommendations({ brand, ...engineInputs }),
     [brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
 
   const recommendedCenterH = useMemo(() => computeRecommendedCenterH({ selectedSize, ...engineInputs }),
-    [selectedSize, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
+    [selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
 
-  const centerH = useMemo(() => computeCenterH({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize }),
-    [mountHeightOverride, heightRef, recommendedCenterH, selectedSize]);
+  const centerH = useMemo(() => computeCenterH({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand }),
+    [mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand]);
 
   const recommendedBox = useMemo(() => recommendBackBox(selectedSize, mountSystem, brand), [selectedSize, mountSystem, brand]);
   const recommendedMount = useMemo(() => recommendSanusMount(selectedSize, sanusStyle, brand), [selectedSize, sanusStyle, brand]);
@@ -1534,10 +1566,12 @@ export default function App() {
 
   // engine-computed display values (UI does no arithmetic)
   const recommendedDisplayH = heightRef === "bottom" && selectedSize
-    ? recommendedCenterH - tvDims(selectedSize).h / 2 : recommendedCenterH;
+    ? recommendedCenterH - tvDimsFor(brand, selectedSize).h / 2 : recommendedCenterH;
   const equivalentH = selectedSize
-    ? (heightRef === "bottom" ? recommendedCenterH : convertOverride(recommendedCenterH, "bottom", selectedSize))
+    ? (heightRef === "bottom" ? recommendedCenterH : convertOverride(recommendedCenterH, "bottom", brand, selectedSize))
     : null;
+  const specPanel = selectedSize ? (TV_OVERRIDES[brand]?.[selectedSize] || null) : null;
+  const effWeightLbs = tvWeightLbs > 0 ? tvWeightLbs : (specPanel?.weightLbs || 0);
 
   // ----- schematic: screen (navy blueprint) + print (white blueline) -----
   const schemState = {
@@ -1760,6 +1794,10 @@ export default function App() {
     if (layout.mount?.system === "sanus") {
       specRows.push(["Mount depth", `${fmt(layout.mount.depth)} off wall${layout.mount.ext ? `, extends to ${fmt(layout.mount.ext)}` : ""}`]);
     }
+    if (specPanel) {
+      if (specPanel.weightLbs) specRows.push(["Panel weight", `${specPanel.weightLbs} lbs (spec sheet)`]);
+      if (specPanel.d && layout.mount?.system === "sanus") specRows.push(["Total off wall", `≈ ${fmt(layout.mount.depth + specPanel.d)} (mount + panel)`]);
+    }
     if (layout.box) {
       specRows.push(["Back box", `${layout.box.brand} ${layout.box.label}`]);
       specRows.push(["Box dimensions", `${layout.box.w}" x ${layout.box.h}" x ${layout.box.d}"D`]);
@@ -1844,7 +1882,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     setMountHeightOverride(prev => {
       const v = parseFloat(prev);
       if (isNaN(v) || !selectedSize) return "";
-      const conv = convertOverride(v, toRef, selectedSize);
+      const conv = convertOverride(v, toRef, brand, selectedSize);
       return conv == null ? "" : conv.toFixed(1);
     });
   };
@@ -1927,7 +1965,13 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
                 </div>
                 <div style={{ fontSize: 11, marginTop: 4, color: "var(--acc)" }}>
                   DEPTH {fmt(sanusMount.depth)} off wall{sanusMount.ext ? ` — extends to ${fmt(sanusMount.ext)}` : ""}
+                  {specPanel?.d ? ` · TOTAL ≈ ${fmt(sanusMount.depth + specPanel.d)} incl. panel` : ""}
                 </div>
+                {specPanel?.weightLbs && (
+                  <div style={{ fontSize: 10, marginTop: 3, opacity: 0.85 }}>
+                    Panel: {specPanel.weightLbs} lbs (spec) — {specPanel.model}
+                  </div>
+                )}
                 <div style={{ fontSize: 9, opacity: 0.6, marginTop: 3 }}>List ${sanusMount.list}</div>
               </div>
             )}
@@ -1943,8 +1987,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
             {selectedSize && sanusMount && !sanusMount.vesaOk && vesaSpec && (
               <div className="note-box"><strong>VESA check:</strong> TV pattern {vesaSpec.w_mm}×{vesaSpec.h_mm} exceeds {sanusMount.model} max {sanusMount.vesaMaxW}×{sanusMount.vesaMaxH}.</div>
             )}
-            {selectedSize && sanusMount && tvWeightLbs > 0 && tvWeightLbs > sanusMount.capLbs && (
-              <div className="warn-box"><div className="warn-title">OVER WEIGHT RATING</div>TV {tvWeightLbs} lbs exceeds {sanusMount.model} capacity of {sanusMount.capLbs} lbs.</div>
+            {selectedSize && sanusMount && effWeightLbs > 0 && effWeightLbs > sanusMount.capLbs && (
+              <div className="warn-box"><div className="warn-title">OVER WEIGHT RATING</div>TV {effWeightLbs} lbs{tvWeightLbs > 0 ? "" : " (from spec sheet)"} exceeds {sanusMount.model} capacity of {sanusMount.capLbs} lbs.</div>
             )}
             <Field label="Manual selection">
               <select className="inp" value={sanusMountModel} onChange={e => setSanusMountModel(e.target.value)}>
@@ -2052,6 +2096,11 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       {showVesa !== null && (
         <Sec icon="bolt" title="VESA">
           <Check on={showVesa} onClick={() => setShowVesa(!showVesa)}>Show VESA on drawing</Check>
+          {showVesa && selectedSize && !vesaSpec && (
+            <div className="note-box">
+              <strong>No VESA data for this panel</strong> — pattern not published yet{TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : ""}. Pull it from the TV's spec sheet before rough-in.
+            </div>
+          )}
           {showVesa && selectedSize && vesaSpec && (
             <div className="vesa-box">
               <div className="rec-tag">{brand.toUpperCase()} {selectedSize}" · 2024/25</div>
