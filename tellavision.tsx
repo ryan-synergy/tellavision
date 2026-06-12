@@ -352,11 +352,15 @@ const buildPartsList = ({ layout, showOutlet, showLowVolt }) => {
 };
 
 // --- persistence ---
-const STORAGE_KEY = "tv-wall-planner-v1"; // unchanged: legacy designs load
+const STORAGE_KEY = "tellavision-v1";
+const LEGACY_STORAGE_KEY = "tv-wall-planner-v1"; // pre-rename designs migrate on load
 const loadSaved = () => {
   try {
     if (typeof window === "undefined") return {};
-    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}") || {};
+    return JSON.parse(
+      window.localStorage.getItem(STORAGE_KEY) ||
+      window.localStorage.getItem(LEGACY_STORAGE_KEY) || "{}"
+    ) || {};
   } catch {
     return {};
   }
@@ -369,8 +373,9 @@ const SAVED_SIZE = TV_CATALOG[SAVED_BRAND].includes(SAVED.selectedSize) ? SAVED.
 // Export carries both the editable design AND the computed numbers so
 // downstream apps can consume results without reimplementing the engine.
 const buildExportJSON = (design, layout) => ({
-  app: "tv-wall-planner", // stable id — interop depends on it
+  app: "tellavision",
   appName: "TellaVision",
+  legacyApp: "tv-wall-planner", // imports accept either id
   schema: 1,
   exportedAt: new Date().toISOString(),
   design,
@@ -559,7 +564,7 @@ const extractImportedDesign = (data) => {
   const out = { fields: {}, matched: [], ignored: 0, notes: [], native: false };
   if (!data || typeof data !== "object") { out.notes.push("Not a JSON object"); return out; }
 
-  if (data.app === "tv-wall-planner" && data.design && typeof data.design === "object") {
+  if ((data.app === "tellavision" || data.app === "tv-wall-planner") && data.design && typeof data.design === "object") {
     out.fields = { ...data.design };
     out.matched.push("native tv-wall-planner design");
     out.native = true;
@@ -761,9 +766,13 @@ const runSelfTests = () => {
     const ex = extractImportedDesign({ tv: { model: "Samsung QN90 75 inch" } });
     return ex.fields.brand === "Samsung" && ex.fields.selectedSize === 75;
   })());
-  T("interop", "Native export round-trips", (() => {
+  T("interop", "Native export round-trips (new id)", (() => {
     const ex = extractImportedDesign(buildExportJSON({ wallW: 96, brand: "LG", selectedSize: 77 }, null));
     return ex.native === true && ex.fields.wallW === 96 && ex.fields.brand === "LG" && ex.fields.selectedSize === 77;
+  })());
+  T("interop", "Legacy tv-wall-planner exports still import", (() => {
+    const ex = extractImportedDesign({ app: "tv-wall-planner", design: { brand: "Sony", selectedSize: 65 } });
+    return ex.native === true && ex.fields.selectedSize === 65;
   })());
   T("interop", "Irrelevant JSON tolerated, nothing matched", (() => {
     const ex = extractImportedDesign({ a: [1, 2, { b: "x" }], c: null, speakers: { count: 4 } });
@@ -970,6 +979,9 @@ const buildSchematic = (S, P) => {
   const rightPad = (hDimRelX - safeWallW * scale) + 24 + textW(`${safeWallH}" H`, 13) + 12;
 
   const hasTitleBlock = !!(projectName || clientName);
+  const tbDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  const titleStr = hasTitleBlock ? `${[projectName, clientName].filter(Boolean).join("  •  ").toUpperCase()}  •  REV ${revision || "01"}  •  ${tbDate}` : "";
+  const ntsStr = "NOT TO SCALE — DIMENSIONS GOVERN";
   // The leader rail can outrun a small-scale wall (anchors near the floor
   // drag pills down). Simulate the exact packing in wall-relative space —
   // pad-independent — and reserve the real overflow in bottomPad.
@@ -998,9 +1010,13 @@ const buildSchematic = (S, P) => {
         prevH = h;
       });
   }
+  // wall width + side pads are already fixed here, so the bottom-row fit
+  // check is exact: stack title and NTS when one row can't hold both
+  const svgWForRow = safeWallW * scale + leftPad + (layout ? Math.max(basePad, 88) : Math.max(basePad, 88));
+  const twoLineBottom = hasTitleBlock && (textW(titleStr, 9) + textW(ntsStr, 9) + 48 > svgWForRow);
   const bottomPad = Math.max(
-    basePad + 26 + (hasTitleBlock ? 16 : 0),
-    railBottomRel - safeWallH * scale + 30 + (hasTitleBlock ? 16 : 0)
+    basePad + 26 + (hasTitleBlock ? (twoLineBottom ? 30 : 16) : 0),
+    railBottomRel - safeWallH * scale + 30 + (hasTitleBlock ? (twoLineBottom ? 30 : 16) : 0)
   );
 
   const wallX = leftPad;
@@ -1282,14 +1298,12 @@ const buildSchematic = (S, P) => {
   elements.push(<line key={K("whb")} x1={whX - 4} y1={floorY} x2={whX + 4} y2={floorY} stroke={P.line} strokeWidth="1"/>);
   elements.push(<text key={K("wht")} x={whX + 8} y={(wallY + floorY) / 2 + 4} fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{fmtIn(safeWallH, dispUnits)} H</text>);
 
-  // title block + NTS note
+  // title block + NTS note — stacked on two rows when one can't hold both
   const tbY = svgH - 10;
   if (hasTitleBlock) {
-    const tbText = [projectName, clientName].filter(Boolean).join("  •  ");
-    const tbDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-    elements.push(<text key={K("tb")} x={16} y={tbY} textAnchor="start" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{tbText.toUpperCase()}  •  REV {revision || "01"}  •  {tbDate}</text>);
+    elements.push(<text key={K("tb")} x={16} y={twoLineBottom ? tbY - 14 : tbY} textAnchor="start" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{titleStr}</text>);
   }
-  elements.push(<text key={K("nts")} x={svgW - 16} y={tbY} textAnchor="end" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">NOT TO SCALE — DIMENSIONS GOVERN</text>);
+  elements.push(<text key={K("nts")} x={svgW - 16} y={tbY} textAnchor="end" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{ntsStr}</text>);
 
   return { elements, svgW, svgH, scale };
 };
@@ -1333,6 +1347,7 @@ const sweepConfigs = () => {
   cfgs.push({ ...base, name: "tape-out small TV mobile", brand: "Samsung", selectedSize: 32, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "frac", hasFireplace: true, showTapeOut: true, isMobile: true, viewportW: 375 });
   cfgs.push({ ...base, name: "tape-out wide TV high", brand: "Samsung", selectedSize: 98, mountSystem: "fa", dispUnits: "ftin", hasFireplace: false, showTapeOut: true, override: String(108 - tvDims(98).h / 2 - 1) });
   cfgs.push({ ...base, name: "tape-out offset TV", brand: "LG", selectedSize: 55, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false, showTapeOut: true, tvOffsetIn: -25 });
+  cfgs.push({ ...base, name: "no TV, long title, narrow wall", brand: "Sony", selectedSize: null, wallW: 80, wallH: 96, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false, projectName: "Round Trip Test Estate", clientName: "R. Carter-Wellington" });
   // sanus full-motion + XL tilt: mount pill, big plates, depth callout
   cfgs.push({ ...base, name: "sanus FM 85 ftin", brand: "Samsung", selectedSize: 85, mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "ftin", hasFireplace: false });
   cfgs.push({ ...base, name: "sanus FM 48 fp", brand: "Sony", selectedSize: 48, mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "dec", hasFireplace: true });
@@ -1516,7 +1531,7 @@ export default function App() {
       projectName, clientName, revision, dispUnits]);
 
   const resetAll = () => {
-    try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { window.localStorage.removeItem(STORAGE_KEY); window.localStorage.removeItem(LEGACY_STORAGE_KEY); } catch {}
     window.location.reload();
   };
 

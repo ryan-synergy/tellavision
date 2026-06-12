@@ -33,7 +33,7 @@
 
   (async () => {
     try {
-      const src = await (await fetch('tv-wall-planner.tsx?ts=' + Date.now())).text();
+      const src = await (await fetch('tellavision.tsx?ts=' + Date.now())).text();
       // Strip the import-from-react line (we provide React/hooks globally below)
       // and convert "export default function App" -> "function App", then bind to window.
       let patched = src
@@ -46,7 +46,7 @@
           ['typescript', { allExtensions: true, isTSX: true }],
           ['react', { runtime: 'classic' }],
         ],
-        filename: 'tv-wall-planner.tsx',
+        filename: 'tellavision.tsx',
       }).code;
 
       // Bring React + hooks into scope of the evaluated code
