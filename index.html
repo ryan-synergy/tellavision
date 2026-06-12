@@ -7,9 +7,9 @@
 <meta name="apple-mobile-web-app-title" content="TellaVision">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="favicon.png">
-<meta name="theme-color" content="#141512">
+<meta name="theme-color" content="#0B1622">
 <title>TellaVision — Synergy AV</title>
-<style>html, body, #root { height: 100%; margin: 0; background:#141512; }</style>
+<style>html, body, #root { height: 100%; margin: 0; background:#0B1622; }</style>
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 </head>
@@ -506,6 +506,11 @@ const VESA_DATA = {
     }
   }
 };
+
+// Every abbreviation that can appear on the drawing or status bar, with its
+// expansion. Feeds the in-app LEGEND panel and the PDF legend strip; the
+// FULL WORDS toggle swaps drawing labels to the spelled-out forms instead.
+const ABBREVIATIONS = [["AFF", "above finished floor"], ["CL", "centerline"], ["CTR", "center"], ["BTM", "bottom"], ["ABV / BLW", "above / below"], ["LT / RT", "left / right of centerline"], ["PWR", "power outlet"], ["LV", "low-voltage feed"], ["VESA", "TV mounting-hole pattern"], ["EXT", "extension (mount reach off wall)"], ["WB", "wall box (Future Automation)"], ["REV", "revision"]];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 2 — ENGINE
@@ -1852,6 +1857,7 @@ const buildSchematic = (S, P) => {
     showTapeOut,
     showTravel,
     travelIn,
+    fullWords,
     projectName,
     clientName,
     revision,
@@ -1861,6 +1867,28 @@ const buildSchematic = (S, P) => {
     viewportW
   } = S;
   const fmt = v => fmtIn(v, dispUnits);
+
+  // drawing vocabulary — abbreviated (default) or spelled out (FULL WORDS).
+  // Expansions must stay in sync with ABBREVIATIONS.
+  const W = fullWords ? {
+    AFF: "ABOVE FLOOR",
+    BTM: "BOTTOM",
+    ABV: "ABOVE",
+    BLW: "BELOW",
+    CL: "CENTERLINE",
+    PWR: "POWER",
+    LV: "LOW VOLTAGE",
+    EXT: "EXTENDS"
+  } : {
+    AFF: "AFF",
+    BTM: "BTM",
+    ABV: "ABV",
+    BLW: "BLW",
+    CL: "CL",
+    PWR: "PWR",
+    LV: "LV",
+    EXT: "EXT"
+  };
   const safeWallW = Math.max(wallW || 1, 1);
   const safeWallH = Math.max(wallH || 1, 1);
   const basePad = isMobile ? 48 : 64;
@@ -1888,7 +1916,8 @@ const buildSchematic = (S, P) => {
   const topPad = Math.max(basePad, -clDimRelY + 30);
 
   // Right: leader rail (when callouts shown) + wall-height dim, both lane-aware.
-  const railW = 148;
+  // Spelled-out labels need a wider rail (worst case: "LOW VOLTAGE 5' - 3 1/8" ABOVE FLOOR").
+  const railW = fullWords ? 250 : 148;
   const hasRail = layout && (showVesa || layout.box || showOutlet || showLowVolt);
   let hDimRelX = safeWallW * scale + 32; // relative to wallX
   if (hasRail) {
@@ -2234,8 +2263,8 @@ const buildSchematic = (S, P) => {
     // ----- leader rail: every right-side callout registers, then packs -----
     const sideOf = x => {
       const d = x - layout.tvCL;
-      if (Math.abs(d) < 0.05) return "ON TV CL";
-      return `${fmt(Math.abs(d))} ${d < 0 ? "LT" : "RT"} OF CL`;
+      if (Math.abs(d) < 0.05) return `ON TV ${W.CL}`;
+      return `${fmt(Math.abs(d))} ${d < 0 ? fullWords ? "LEFT" : "LT" : fullWords ? "RIGHT" : "RT"} OF ${W.CL}`;
     };
     const rail = [];
     if (showVesa && layout.vesa) {
@@ -2268,16 +2297,16 @@ const buildSchematic = (S, P) => {
       });
       if (showBoxDims) {
         lines.push({
-          text: `BOX BTM ${fmt(layout.box.btm)} AFF`,
+          text: `BOX ${W.BTM} ${fmt(layout.box.btm)} ${W.AFF}`,
           size: 9
         });
         const d = layout.box.btm - layout.tvBottom;
         lines.push({
-          text: `${fmt(Math.abs(d))} ${d >= 0 ? "ABV" : "BLW"} TV BTM`,
+          text: `${fmt(Math.abs(d))} ${d >= 0 ? W.ABV : W.BLW} TV ${W.BTM}`,
           size: 9
         });
         if (hasFireplace && hasMantel) lines.push({
-          text: `${fmt(layout.box.btm - mantelH)} ABV MANTEL`,
+          text: `${fmt(layout.box.btm - mantelH)} ${W.ABV} MANTEL`,
           size: 9
         });
       }
@@ -2322,7 +2351,7 @@ const buildSchematic = (S, P) => {
         anchor: [ox + 7, oy],
         anchorY: oy,
         lines: [{
-          text: `PWR ${fmt(layout.outlet.aff)} AFF`,
+          text: `${W.PWR} ${fmt(layout.outlet.aff)} ${W.AFF}`,
           size: 10
         }, {
           text: sideOf(layout.outlet.x),
@@ -2359,7 +2388,7 @@ const buildSchematic = (S, P) => {
         anchor: [lx + 6, ly],
         anchorY: ly,
         lines: [{
-          text: `LV ${fmt(layout.lv.aff)} AFF`,
+          text: `${W.LV} ${fmt(layout.lv.aff)} ${W.AFF}`,
           size: 10
         }, {
           text: sideOf(layout.lv.x),
@@ -2392,7 +2421,7 @@ const buildSchematic = (S, P) => {
           text: `SANUS ${layout.mount.model}`,
           size: 10
         }, {
-          text: `DEPTH ${fmt(layout.mount.depth)}${layout.mount.ext ? ` · EXT ${fmt(layout.mount.ext)}` : ""}`,
+          text: `DEPTH ${fmt(layout.mount.depth)}${layout.mount.ext ? ` · ${W.EXT} ${fmt(layout.mount.ext)}` : ""}`,
           size: 9
         }]
       });
@@ -2656,7 +2685,7 @@ const buildSchematic = (S, P) => {
       stroke: P.cl,
       strokeWidth: "1"
     }));
-    const clTxt = `${fmt(layout.tvCL)} TO TV CL`;
+    const clTxt = `${fmt(layout.tvCL)} TO TV ${W.CL}`;
     const clMidX = (wallX + clPx) / 2;
     const clW = textW(clTxt, 10) + 8;
     elements.push(/*#__PURE__*/React.createElement("rect", {
@@ -2685,7 +2714,7 @@ const buildSchematic = (S, P) => {
     if (showTapeOut) {
       const tTop = floorY - layout.tvTop * scale;
       const tBtm = floorY - layout.tvBottom * scale;
-      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} AFF`], ["t-btm", tBtm, `BTM ${fmt(layout.tvBottom)} AFF`]].forEach(([id, y, txt]) => {
+      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} ${W.AFF}`], ["t-btm", tBtm, `${W.BTM} ${fmt(layout.tvBottom)} ${W.AFF}`]].forEach(([id, y, txt]) => {
         elements.push(/*#__PURE__*/React.createElement("line", {
           key: K(id),
           x1: wallX + 2,
@@ -2891,6 +2920,7 @@ const sweepConfigs = () => {
     projectName: "Sweep",
     clientName: "QA",
     revision: "01",
+    fullWords: false,
     isMobile: false,
     isTablet: false,
     viewportW: 1280,
@@ -3142,6 +3172,70 @@ const sweepConfigs = () => {
     hasFireplace: false,
     projectName: "Round Trip Test Estate",
     clientName: "R. Carter-Wellington"
+  });
+  // FULL WORDS mode: longest labels the rail/tape/CL lanes can carry — worst
+  // with ft-in units (e.g. LOW VOLTAGE 5' - 3 1/8" ABOVE FLOOR)
+  cfgs.push({
+    ...base,
+    name: "fullwords fp ftin 65",
+    brand: "Sony",
+    selectedSize: 65,
+    mountSystem: "fa",
+    dispUnits: "ftin",
+    hasFireplace: true,
+    fullWords: true
+  });
+  cfgs.push({
+    ...base,
+    name: "fullwords cramped 60×72",
+    brand: "Samsung",
+    selectedSize: 32,
+    wallW: 60,
+    wallH: 72,
+    mountSystem: "fa",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    heightRef: "bottom",
+    fullWords: true
+  });
+  cfgs.push({
+    ...base,
+    name: "fullwords tape-out mobile",
+    brand: "Samsung",
+    selectedSize: 75,
+    mountSystem: "sanus",
+    sanusStyle: "fullmotion",
+    dispUnits: "frac",
+    hasFireplace: false,
+    showTapeOut: true,
+    isMobile: true,
+    viewportW: 375,
+    fullWords: true
+  });
+  cfgs.push({
+    ...base,
+    name: "fullwords TV hard right ftin",
+    brand: "Sony",
+    selectedSize: 55,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    tvOffsetIn: 33,
+    fullWords: true
+  });
+  cfgs.push({
+    ...base,
+    name: "fullwords giant wall ftin",
+    brand: "Samsung",
+    selectedSize: 115,
+    wallW: 300,
+    wallH: 140,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    fullWords: true
   });
   // sanus full-motion + XL tilt: mount pill, big plates, depth callout
   cfgs.push({
@@ -3460,16 +3554,26 @@ const Sec = ({
   icon,
   title,
   children,
-  first
-}) => /*#__PURE__*/React.createElement("div", {
-  style: {
-    marginTop: first ? 0 : 26
-  }
-}, /*#__PURE__*/React.createElement("div", {
-  className: "sec-title"
-}, /*#__PURE__*/React.createElement(Icon, {
-  name: icon
-}), " ", title), children);
+  first,
+  defaultOpen = true,
+  summary
+}) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: first ? 0 : 22
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sec-title sec-clk",
+    onClick: () => setOpen(o => !o)
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: icon
+  }), " ", title, /*#__PURE__*/React.createElement("span", {
+    className: "sec-sum"
+  }, !open && summary ? summary : ""), /*#__PURE__*/React.createElement("span", {
+    className: `sec-chev ${open ? "" : "closed"}`
+  }, "\u25BE")), open && children);
+};
 const Field = ({
   label,
   children,
@@ -3545,6 +3649,7 @@ function App() {
   const [showTapeOut, setShowTapeOut] = useState(SAVED.showTapeOut ?? false);
   const [showTravel, setShowTravel] = useState(SAVED.showTravel ?? true);
   const [bracketTravel, setBracketTravel] = useState(SAVED.bracketTravel ?? "1.5");
+  const [fullWords, setFullWords] = useState(SAVED.fullWords ?? false);
   const [mountHeightOverride, setMountHeightOverride] = useState(SAVED.mountHeightOverride ?? "");
   const [heightRef, setHeightRef] = useState(SAVED.heightRef === "bottom" ? "bottom" : "center");
   const [showAllSizes, setShowAllSizes] = useState(SAVED.showAllSizes ?? false);
@@ -3563,6 +3668,7 @@ function App() {
   const [importSummary, setImportSummary] = useState(null);
   const [sweep, setSweep] = useState(null);
   const [showExport, setShowExport] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
   useEffect(() => {
     const onResize = () => setViewportW(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -3602,6 +3708,7 @@ function App() {
         showTapeOut,
         showTravel,
         bracketTravel,
+        fullWords,
         mountHeightOverride,
         heightRef,
         showAllSizes,
@@ -3611,7 +3718,7 @@ function App() {
         dispUnits
       }));
     } catch {/* storage unavailable — run without persistence */}
-  }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
+  }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
   const resetAll = () => {
     try {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -3726,6 +3833,7 @@ function App() {
     showTapeOut,
     showTravel,
     travelIn,
+    fullWords,
     projectName,
     clientName,
     revision,
@@ -3734,13 +3842,13 @@ function App() {
     isTablet,
     viewportW
   };
-  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
+  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
   const printSchem = useMemo(() => buildSchematic({
     ...schemState,
     isMobile: false,
     isTablet: false,
     viewportW: 1280
-  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, projectName, clientName, revision, dispUnits]);
+  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits]);
   const svgRef = useRef(null);
   const printRef = useRef(null);
   const fileRef = useRef(null);
@@ -3831,6 +3939,7 @@ function App() {
     showTapeOut,
     showTravel,
     bracketTravel,
+    fullWords,
     mountHeightOverride,
     heightRef,
     showAllSizes,
@@ -3932,6 +4041,7 @@ function App() {
     if (typeof f.showOutlet === "boolean") setShowOutlet(f.showOutlet);
     if (typeof f.showLowVolt === "boolean") setShowLowVolt(f.showLowVolt);
     if (typeof f.showVesa === "boolean") setShowVesa(f.showVesa);
+    if (typeof f.fullWords === "boolean") setFullWords(f.fullWords);
     if (typeof f.mountHeightOverride === "string") setMountHeightOverride(f.mountHeightOverride);
     if (f.heightRef === "center" || f.heightRef === "bottom") setHeightRef(f.heightRef);
     if (typeof f.projectName === "string") setProjectName(f.projectName);
@@ -4063,6 +4173,7 @@ function App() {
     const metaHtml = "Front Elevation · REV " + (revision || "01") + (clientName.trim() ? "<br/>" + clientName.trim() : "") + "<br/>" + today;
     const specRowsHtml = specRows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
     const partsHtml = parts.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+    const legendHtml = ABBREVIATIONS.map(([a, f]) => `<span><strong>${a}</strong> ${f}</span>`).join("");
     const vesaNote = layout.vesa && layout.vesa.spec.note ? `<p style="margin:8px 0 0 0;"><strong>${brand} ${selectedSize}":</strong> ${layout.vesa.spec.note}</p>` : "";
     const bbNote = layout.box && layout.box.note ? `<p style="margin:8px 0 0 0;"><strong>Back box:</strong> ${layout.box.note}</p>` : "";
     const ratingNote = layout.box && layout.box.underRated ? `<p style="margin:8px 0 0 0;"><strong>Check rating:</strong> ${layout.box.label} is rated ${layout.box.tvMin}"–${layout.box.tvMax}" — selected ${selectedSize}".</p>` : "";
@@ -4072,8 +4183,10 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5px solid #102A43; padding-bottom: 12px; margin-bottom: 22px; }
 .header h1 { margin: 0; font-size: 21px; letter-spacing: -0.3px; }
 .header .meta { font-size: 10px; letter-spacing: 1.5px; color: #5C7186; text-transform: uppercase; text-align: right; line-height: 1.6; }
-.schematic-wrap { text-align: center; margin-bottom: 22px; padding: 14px; background: #FBFCFE; border: 1px solid #C9D6E2; }
+.schematic-wrap { text-align: center; margin-bottom: 0; padding: 14px; background: #FBFCFE; border: 1px solid #C9D6E2; }
 .schematic-wrap svg { max-width: 100%; height: auto; }
+.legend-strip { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 0 0 22px; padding: 7px 12px; border: 1px solid #C9D6E2; border-top: none; background: #FBFCFE; font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #5C7186; }
+.legend-strip strong { color: #102A43; }
 .section-label { font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: #102A43; font-weight: 700; padding-bottom: 6px; border-bottom: 1px solid #C9D6E2; margin-bottom: 10px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 22px; }
 .spec-table { width: 100%; border-collapse: collapse; }
@@ -4089,6 +4202,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 <button class="print-btn no-print" onclick="window.print()">Print / Save as PDF</button>
 <div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">AV INSTALLATION DRAWING</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
 <div class="schematic-wrap">${svgData}</div>
+<div class="legend-strip">${legendHtml}</div>
 <div class="grid2">
 <div><div class="section-label">Specifications</div><table class="spec-table">${specRowsHtml}</table></div>
 <div>
@@ -4125,7 +4239,9 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   const setupPanel = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Sec, {
     icon: "doc",
     title: "Project",
-    first: true
+    first: true,
+    defaultOpen: !SAVED.projectName,
+    summary: [projectName, clientName].filter(Boolean).join(" — ")
   }, /*#__PURE__*/React.createElement(Field, {
     label: "Project / Address"
   }, /*#__PURE__*/React.createElement("input", {
@@ -4157,7 +4273,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     onChange: e => setRevision(e.target.value)
   })))), /*#__PURE__*/React.createElement(Sec, {
     icon: "wall",
-    title: "Wall"
+    title: "Wall",
+    summary: `${wallW}" × ${wallH}"`
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -4180,7 +4297,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     onChange: e => setWallH(+e.target.value || 0)
   })))), /*#__PURE__*/React.createElement(Sec, {
     icon: "fire",
-    title: "Fireplace"
+    title: "Fireplace",
+    summary: hasFireplace ? hasMantel ? "yes + mantel" : "yes" : "none"
   }, /*#__PURE__*/React.createElement(Check, {
     on: hasFireplace,
     onClick: () => setHasFireplace(!hasFireplace)
@@ -4244,7 +4362,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     onChange: e => setMantelDepth(+e.target.value || 0)
   }))))), /*#__PURE__*/React.createElement(Sec, {
     icon: "eye",
-    title: "Viewing"
+    title: "Viewing",
+    summary: useViewDist ? `${(viewDist / 12).toFixed(1)} ft` : "off"
   }, /*#__PURE__*/React.createElement(Check, {
     on: useViewDist,
     onClick: () => setUseViewDist(!useViewDist)
@@ -4258,7 +4377,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     onChange: e => setViewDist(+e.target.value || 0)
   }))), /*#__PURE__*/React.createElement(Sec, {
     icon: "tv",
-    title: "Brand"
+    title: "Brand",
+    summary: brand
   }, /*#__PURE__*/React.createElement(Seg, {
     options: BRANDS.map(b => ({
       value: b,
@@ -4271,7 +4391,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   })), /*#__PURE__*/React.createElement(Sec, {
     icon: "mount",
-    title: "Mount"
+    title: "Mount",
+    summary: mountSystem === "fa" ? "Future Automation" : `Sanus ${sanusStyle === "fullmotion" ? "full motion" : sanusStyle}`
   }, /*#__PURE__*/React.createElement(Seg, {
     options: [{
       value: "sanus",
@@ -4427,7 +4548,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     key: i
   }, "\u2022 ", iss)))), /*#__PURE__*/React.createElement(Sec, {
     icon: "box",
-    title: "Back Box"
+    title: "Back Box",
+    summary: showBackBox ? layout?.box?.label || "on" : "off"
   }, /*#__PURE__*/React.createElement(Check, {
     on: showBackBox,
     onClick: () => setShowBackBox(!showBackBox)
@@ -4473,10 +4595,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     value: k
   }, v.label))))), layout?.box?.underRated && /*#__PURE__*/React.createElement("div", {
     className: "note-box"
-  }, /*#__PURE__*/React.createElement("strong", null, "Check rating:"), " ", layout.box.label, " is rated for ", layout.box.tvMin, "\"\u2013", layout.box.tvMax, "\" TVs \u2014 selected ", selectedSize, "\". Verify bracket compatibility."), /*#__PURE__*/React.createElement(Check, {
-    on: showBoxDims,
-    onClick: () => setShowBoxDims(!showBoxDims)
-  }, "Box rough-in dims (bottom edge)"), mountSystem === "fa" && layout?.box?.brand === "Future Automation" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Check, {
+  }, /*#__PURE__*/React.createElement("strong", null, "Check rating:"), " ", layout.box.label, " is rated for ", layout.box.tvMin, "\"\u2013", layout.box.tvMax, "\" TVs \u2014 selected ", selectedSize, "\". Verify bracket compatibility."), mountSystem === "fa" && layout?.box?.brand === "Future Automation" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Check, {
     on: showTravel,
     onClick: () => setShowTravel(!showTravel)
   }, "Show bracket vertical range"), showTravel && /*#__PURE__*/React.createElement(Field, {
@@ -4487,33 +4606,16 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     type: "number",
     value: bracketTravel,
     onChange: e => setBracketTravel(e.target.value)
-  }))))), /*#__PURE__*/React.createElement(Sec, {
-    icon: "plug",
-    title: "Electrical"
-  }, /*#__PURE__*/React.createElement(Check, {
-    on: showOutlet,
-    onClick: () => setShowOutlet(!showOutlet)
-  }, "Recessed outlet"), /*#__PURE__*/React.createElement(Check, {
-    on: showLowVolt,
-    onClick: () => setShowLowVolt(!showLowVolt)
-  }, "Low-voltage feed")), /*#__PURE__*/React.createElement(Sec, {
-    icon: "tv",
-    title: "Drawing"
-  }, /*#__PURE__*/React.createElement(Check, {
-    on: showTvDims,
-    onClick: () => setShowTvDims(!showTvDims)
-  }, "TV W \xD7 H dimensions"), /*#__PURE__*/React.createElement(Check, {
-    on: showTapeOut,
-    onClick: () => setShowTapeOut(!showTapeOut)
-  }, "Tape-out mode (wall tape lines)")), showVesa !== null && /*#__PURE__*/React.createElement(Sec, {
+  }))))), selectedSize && /*#__PURE__*/React.createElement(Sec, {
     icon: "bolt",
-    title: "VESA"
-  }, /*#__PURE__*/React.createElement(Check, {
-    on: showVesa,
-    onClick: () => setShowVesa(!showVesa)
-  }, "Show VESA on drawing"), showVesa && selectedSize && !vesaSpec && /*#__PURE__*/React.createElement("div", {
-    className: "note-box"
-  }, /*#__PURE__*/React.createElement("strong", null, "No VESA data for this panel"), " \u2014 pattern not published yet", TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : "", ". Pull it from the TV's spec sheet before rough-in."), showVesa && selectedSize && vesaSpec && /*#__PURE__*/React.createElement("div", {
+    title: "VESA",
+    summary: vesaSpec ? `${vesaSpec.w_mm}×${vesaSpec.h_mm}` : "no data"
+  }, !vesaSpec && /*#__PURE__*/React.createElement("div", {
+    className: "note-box",
+    style: {
+      marginTop: 0
+    }
+  }, /*#__PURE__*/React.createElement("strong", null, "No VESA data for this panel"), " \u2014 pattern not published yet", TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : "", ". Pull it from the TV's spec sheet before rough-in."), vesaSpec && /*#__PURE__*/React.createElement("div", {
     className: "vesa-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "rec-tag"
@@ -4553,19 +4655,10 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "size-strip-head"
   }, /*#__PURE__*/React.createElement("span", {
     className: "strip-title"
-  }, showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: `chip ${showTapeOut ? "on" : ""}`,
-    onClick: () => setShowTapeOut(!showTapeOut),
-    title: "Show the tape lines to mark the TV on the real wall"
-  }, "TAPE-OUT"), /*#__PURE__*/React.createElement("button", {
+  }, showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`), /*#__PURE__*/React.createElement("button", {
     className: `chip ${showAllSizes ? "on" : ""}`,
     onClick: () => setShowAllSizes(!showAllSizes)
-  }, "SHOW ALL"))), /*#__PURE__*/React.createElement("div", {
+  }, "SHOW ALL")), /*#__PURE__*/React.createElement("div", {
     className: "size-strip"
   }, (showAllSizes ? TV_CATALOG[brand] : recommendations).map(sz => {
     const fitIssues = computeFitIssues(sz, engineInputs);
@@ -4596,6 +4689,60 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "NOT A RECOMMENDED FIT"), computeFitIssues(selectedSize, engineInputs).map((iss, i) => /*#__PURE__*/React.createElement("div", {
     key: i
   }, "\u2022 ", iss)), computeFitIssues(selectedSize, engineInputs).length === 0 && /*#__PURE__*/React.createElement("div", null, "Outside typical proportional guidelines for this wall.")));
+
+  // display toggles live next to the drawing they affect; PWR/LV also feed
+  // the parts list and PDF spec rows, same as they always did
+  const toggleStrip = /*#__PURE__*/React.createElement("div", {
+    className: "toggle-strip"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "strip-title"
+  }, "SHOW"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showOutlet ? "on" : ""}`,
+    onClick: () => setShowOutlet(!showOutlet),
+    title: "Recessed power outlet \u2014 drawing, parts list, PDF"
+  }, "PWR"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showLowVolt ? "on" : ""}`,
+    onClick: () => setShowLowVolt(!showLowVolt),
+    title: "Low-voltage feed \u2014 drawing, parts list, PDF"
+  }, "LV"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showVesa ? "on" : ""}`,
+    onClick: () => setShowVesa(!showVesa),
+    title: "VESA pattern on the drawing"
+  }, "VESA"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showTvDims ? "on" : ""}`,
+    onClick: () => setShowTvDims(!showTvDims),
+    title: "TV width \xD7 height dimension line"
+  }, "TV DIMS"), showBackBox && /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showBoxDims ? "on" : ""}`,
+    onClick: () => setShowBoxDims(!showBoxDims),
+    title: "Back-box rough-in dims (bottom edge)"
+  }, "BOX DIMS"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showTapeOut ? "on" : ""}`,
+    onClick: () => setShowTapeOut(!showTapeOut),
+    title: "Tape lines to mark the TV on the real wall"
+  }, "TAPE-OUT"), /*#__PURE__*/React.createElement("span", {
+    className: "strip-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${fullWords ? "on" : ""}`,
+    onClick: () => setFullWords(!fullWords),
+    title: "Spell out abbreviations on the drawing and PDF"
+  }, "FULL WORDS"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showLegend ? "on" : ""}`,
+    onClick: () => setShowLegend(!showLegend),
+    title: "What the abbreviations mean"
+  }, "LEGEND"));
+  const legendPanel = showLegend && /*#__PURE__*/React.createElement("div", {
+    className: "legend-box"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rec-tag"
+  }, "ABBREVIATIONS"), /*#__PURE__*/React.createElement("div", {
+    className: "legend-grid"
+  }, ABBREVIATIONS.map(([a, full]) => /*#__PURE__*/React.createElement("div", {
+    key: a,
+    className: "legend-row"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "legend-abbr"
+  }, a), /*#__PURE__*/React.createElement("span", null, full)))));
   const statusBar = /*#__PURE__*/React.createElement("div", {
     className: "status-bar"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4942,12 +5089,17 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--ink); }
-        .app { min-height: 100vh; background: var(--ink); color: var(--txt); font-family: var(--fd); }
+        .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--ink); color: var(--txt); font-family: var(--fd); }
         .hdr { display: flex; justify-content: space-between; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; gap: 10px; }
         .hdr h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; margin: 0; }
         .hdr .sub { font-family: var(--fm); font-size: 9px; letter-spacing: 2px; color: var(--txt3); margin-top: 2px; }
         .hdr-proj { font-family: var(--fm); font-size: 11px; color: var(--txt2); }
         .sec-title { font-family: var(--fm); font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--txt2); font-weight: 600; padding-bottom: 7px; border-bottom: 1px solid var(--line); margin-bottom: 12px; display: flex; align-items: center; gap: 7px; }
+        .sec-clk { cursor: pointer; user-select: none; -webkit-user-select: none; }
+        .sec-clk:hover { color: var(--txt); }
+        .sec-sum { flex: 1; min-width: 0; text-align: right; color: var(--txt3); letter-spacing: 0.5px; text-transform: none; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sec-chev { color: var(--txt3); transition: transform .15s; flex-shrink: 0; }
+        .sec-chev.closed { transform: rotate(-90deg); }
         .lbl { font-family: var(--fm); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--txt3); margin-bottom: 5px; }
         .hint { font-family: var(--fm); font-size: 10px; color: var(--txt3); margin-top: 4px; line-height: 1.5; }
         .inp { width: 100%; padding: 9px 11px; border: 1px solid var(--line2); background: var(--ink2); font-family: var(--fm); font-size: 15px; color: var(--txt); outline: none; border-radius: 4px; min-height: 42px; transition: border-color .15s; -webkit-appearance: none; appearance: none; }
@@ -5019,7 +5171,16 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .tab { flex: 1; padding: 13px 8px; border: none; background: transparent; border-bottom: 2px solid transparent; font-family: var(--fm); font-size: 10px; letter-spacing: 2px; cursor: pointer; color: var(--txt3); font-weight: 600; }
         .tab.on { color: var(--txt); border-bottom-color: var(--acc); }
         .sidebar { border-right: 1px solid var(--line); padding: 20px; overflow-y: auto; background: var(--ink); }
-        .main-col { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .main-col { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-y: auto; }
+        .toggle-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .strip-sep { width: 1px; height: 16px; background: var(--line2); margin: 0 4px; }
+        .legend-box { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line2); border-radius: 5px; }
+        .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 18px; margin-top: 6px; }
+        .legend-row { display: flex; gap: 8px; font-family: var(--fm); font-size: 10.5px; color: var(--txt2); padding: 2px 0; }
+        .legend-abbr { color: var(--acc); font-weight: 700; min-width: 68px; flex-shrink: 0; }
+        .mini-preview { position: sticky; top: -20px; z-index: 30; margin: -20px -20px 16px; padding: 10px 14px 7px; background: var(--ink); border-bottom: 1px solid var(--line2); cursor: pointer; }
+        .mini-preview svg { display: block; width: 100%; height: auto; max-height: 130px; }
+        .mini-tag { font-family: var(--fm); font-size: 8px; letter-spacing: 1.5px; color: var(--txt3); text-align: center; margin-top: 4px; }
         input[type="number"] { -moz-appearance: textfield; }
         input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         ::-webkit-scrollbar { height: 8px; width: 8px; }
@@ -5053,19 +5214,33 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     style: {
       display: "grid",
       gridTemplateColumns: isMobile ? "1fr" : isTablet ? "290px 1fr" : "320px 1fr",
-      minHeight: "calc(100vh - 70px)"
+      flex: 1,
+      minHeight: 0
     }
   }, /*#__PURE__*/React.createElement("aside", {
     className: "sidebar",
     style: {
       display: isMobile && activePanel !== "setup" ? "none" : "block"
     }
-  }, setupPanel), /*#__PURE__*/React.createElement("main", {
+  }, isMobile && layout && /*#__PURE__*/React.createElement("div", {
+    className: "mini-preview",
+    onClick: () => setActivePanel("drawing")
+  }, /*#__PURE__*/React.createElement("svg", {
+    viewBox: `0 0 ${screenSchem.svgW} ${screenSchem.svgH}`,
+    preserveAspectRatio: "xMidYMid meet",
+    xmlns: "http://www.w3.org/2000/svg"
+  }, /*#__PURE__*/React.createElement("rect", {
+    width: "100%",
+    height: "100%",
+    fill: SCREEN_PALETTE.canvas
+  }), screenSchem.elements), /*#__PURE__*/React.createElement("div", {
+    className: "mini-tag"
+  }, "LIVE PREVIEW \u2014 TAP FOR FULL DRAWING")), setupPanel), /*#__PURE__*/React.createElement("main", {
     className: "main-col",
     style: {
       display: isMobile && activePanel !== "drawing" ? "none" : "flex"
     }
-  }, importBanner, sizeStrip, canvas, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
+  }, importBanner, sizeStrip, toggleStrip, legendPanel, canvas, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "center"

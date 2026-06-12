@@ -87,6 +87,24 @@ const VESA_DATA = {
   },
 };
 
+// Every abbreviation that can appear on the drawing or status bar, with its
+// expansion. Feeds the in-app LEGEND panel and the PDF legend strip; the
+// FULL WORDS toggle swaps drawing labels to the spelled-out forms instead.
+const ABBREVIATIONS = [
+  ["AFF", "above finished floor"],
+  ["CL", "centerline"],
+  ["CTR", "center"],
+  ["BTM", "bottom"],
+  ["ABV / BLW", "above / below"],
+  ["LT / RT", "left / right of centerline"],
+  ["PWR", "power outlet"],
+  ["LV", "low-voltage feed"],
+  ["VESA", "TV mounting-hole pattern"],
+  ["EXT", "extension (mount reach off wall)"],
+  ["WB", "wall box (Future Automation)"],
+  ["REV", "revision"],
+];
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 2 — ENGINE
 // Pure functions only: inches in, inches out. No React, no DOM, no rounding.
@@ -936,10 +954,16 @@ const buildSchematic = (S, P) => {
     wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
     mantelH, mantelDepth, brand, selectedSize, layout, heightRef,
     showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut,
-    showTravel, travelIn, projectName, clientName, revision,
+    showTravel, travelIn, fullWords, projectName, clientName, revision,
     dispUnits, isMobile, isTablet, viewportW,
   } = S;
   const fmt = (v) => fmtIn(v, dispUnits);
+
+  // drawing vocabulary — abbreviated (default) or spelled out (FULL WORDS).
+  // Expansions must stay in sync with ABBREVIATIONS.
+  const W = fullWords
+    ? { AFF: "ABOVE FLOOR", BTM: "BOTTOM", ABV: "ABOVE", BLW: "BELOW", CL: "CENTERLINE", PWR: "POWER", LV: "LOW VOLTAGE", EXT: "EXTENDS" }
+    : { AFF: "AFF", BTM: "BTM", ABV: "ABV", BLW: "BLW", CL: "CL", PWR: "PWR", LV: "LV", EXT: "EXT" };
 
   const safeWallW = Math.max(wallW || 1, 1);
   const safeWallH = Math.max(wallH || 1, 1);
@@ -968,7 +992,8 @@ const buildSchematic = (S, P) => {
   const topPad = Math.max(basePad, -clDimRelY + 30);
 
   // Right: leader rail (when callouts shown) + wall-height dim, both lane-aware.
-  const railW = 148;
+  // Spelled-out labels need a wider rail (worst case: "LOW VOLTAGE 5' - 3 1/8" ABOVE FLOOR").
+  const railW = fullWords ? 250 : 148;
   const hasRail = layout && (showVesa || layout.box || showOutlet || showLowVolt);
   let hDimRelX = safeWallW * scale + 32; // relative to wallX
   if (hasRail) {
@@ -1128,8 +1153,8 @@ const buildSchematic = (S, P) => {
     // ----- leader rail: every right-side callout registers, then packs -----
     const sideOf = (x) => {
       const d = x - layout.tvCL;
-      if (Math.abs(d) < 0.05) return "ON TV CL";
-      return `${fmt(Math.abs(d))} ${d < 0 ? "LT" : "RT"} OF CL`;
+      if (Math.abs(d) < 0.05) return `ON TV ${W.CL}`;
+      return `${fmt(Math.abs(d))} ${d < 0 ? (fullWords ? "LEFT" : "LT") : (fullWords ? "RIGHT" : "RT")} OF ${W.CL}`;
     };
     const rail = [];
     if (showVesa && layout.vesa) {
@@ -1151,10 +1176,10 @@ const buildSchematic = (S, P) => {
       ];
       if (layout.box.extendsOff) lines.push({ text: "! EXTENDS BEYOND TV", size: 8 });
       if (showBoxDims) {
-        lines.push({ text: `BOX BTM ${fmt(layout.box.btm)} AFF`, size: 9 });
+        lines.push({ text: `BOX ${W.BTM} ${fmt(layout.box.btm)} ${W.AFF}`, size: 9 });
         const d = layout.box.btm - layout.tvBottom;
-        lines.push({ text: `${fmt(Math.abs(d))} ${d >= 0 ? "ABV" : "BLW"} TV BTM`, size: 9 });
-        if (hasFireplace && hasMantel) lines.push({ text: `${fmt(layout.box.btm - mantelH)} ABV MANTEL`, size: 9 });
+        lines.push({ text: `${fmt(Math.abs(d))} ${d >= 0 ? W.ABV : W.BLW} TV ${W.BTM}`, size: 9 });
+        if (hasFireplace && hasMantel) lines.push({ text: `${fmt(layout.box.btm - mantelH)} ${W.ABV} MANTEL`, size: 9 });
       }
       rail.push({ id: "bb", color: c, anchor: [bbX + bbPxW, bbY + bbPxH / 2], anchorY: bbY + bbPxH / 2, lines });
     }
@@ -1166,7 +1191,7 @@ const buildSchematic = (S, P) => {
       elements.push(<circle key={K("o2")} cx={ox + 2.5} cy={oy} r="1.2" fill={P.pwr}/>);
       rail.push({
         id: "pwr", color: P.pwr, anchor: [ox + 7, oy], anchorY: oy,
-        lines: [{ text: `PWR ${fmt(layout.outlet.aff)} AFF`, size: 10 }, { text: sideOf(layout.outlet.x), size: 9 }],
+        lines: [{ text: `${W.PWR} ${fmt(layout.outlet.aff)} ${W.AFF}`, size: 10 }, { text: sideOf(layout.outlet.x), size: 9 }],
       });
     }
     if (showLowVolt) {
@@ -1176,7 +1201,7 @@ const buildSchematic = (S, P) => {
       elements.push(<text key={K("lvt")} x={lx} y={ly + 3} textAnchor="middle" fill={P.lv} fontSize="7" fontFamily="'IBM Plex Mono', monospace" fontWeight="700">LV</text>);
       rail.push({
         id: "lv", color: P.lv, anchor: [lx + 6, ly], anchorY: ly,
-        lines: [{ text: `LV ${fmt(layout.lv.aff)} AFF`, size: 10 }, { text: sideOf(layout.lv.x), size: 9 }],
+        lines: [{ text: `${W.LV} ${fmt(layout.lv.aff)} ${W.AFF}`, size: 10 }, { text: sideOf(layout.lv.x), size: 9 }],
       });
     }
     if (showTapeOut) {
@@ -1195,7 +1220,7 @@ const buildSchematic = (S, P) => {
         anchorY: vesaCenterY,
         lines: [
           { text: `SANUS ${layout.mount.model}`, size: 10 },
-          { text: `DEPTH ${fmt(layout.mount.depth)}${layout.mount.ext ? ` · EXT ${fmt(layout.mount.ext)}` : ""}`, size: 9 },
+          { text: `DEPTH ${fmt(layout.mount.depth)}${layout.mount.ext ? ` · ${W.EXT} ${fmt(layout.mount.ext)}` : ""}`, size: 9 },
         ],
       });
     }
@@ -1257,7 +1282,7 @@ const buildSchematic = (S, P) => {
     elements.push(<line key={K("cl-dim")} x1={wallX} y1={clDimY} x2={clPx} y2={clDimY} stroke={P.cl} strokeWidth="1"/>);
     elements.push(<line key={K("cl-da")} x1={wallX} y1={clDimY - 4} x2={wallX} y2={clDimY + 4} stroke={P.cl} strokeWidth="1"/>);
     elements.push(<line key={K("cl-db")} x1={clPx} y1={clDimY - 4} x2={clPx} y2={clDimY + 4} stroke={P.cl} strokeWidth="1"/>);
-    const clTxt = `${fmt(layout.tvCL)} TO TV CL`;
+    const clTxt = `${fmt(layout.tvCL)} TO TV ${W.CL}`;
     const clMidX = (wallX + clPx) / 2;
     const clW = textW(clTxt, 10) + 8;
     elements.push(<rect key={K("cl-bg")} x={clMidX - clW / 2} y={clDimY - 16} width={clW} height={13} fill={P.halo} stroke="none" rx="2"/>);
@@ -1267,7 +1292,7 @@ const buildSchematic = (S, P) => {
     if (showTapeOut) {
       const tTop = floorY - layout.tvTop * scale;
       const tBtm = floorY - layout.tvBottom * scale;
-      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} AFF`], ["t-btm", tBtm, `BTM ${fmt(layout.tvBottom)} AFF`]].forEach(([id, y, txt]) => {
+      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} ${W.AFF}`], ["t-btm", tBtm, `${W.BTM} ${fmt(layout.tvBottom)} ${W.AFF}`]].forEach(([id, y, txt]) => {
         elements.push(<line key={K(id)} x1={wallX + 2} y1={y} x2={wallX + wallPxW - 2} y2={y} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
         const w = textW(txt, 10) + 10;
         elements.push(<rect key={K(`${id}-bg`)} x={wallX + 6} y={y - 14} width={w} height={13} fill={P.halo} rx="2"/>);
@@ -1317,7 +1342,7 @@ const sweepConfigs = () => {
     wallW: 120, wallH: 108, fbOpeningW: 40, fbOpeningH: 30, mantelH: 54, mantelDepth: 8,
     fbOffsetIn: 0, hasMantel: true, showVesa: true, showOutlet: true, showLowVolt: true,
     showBoxDims: true, showTvDims: true, showTapeOut: false, showTravel: true, travelIn: 1.5,
-    projectName: "Sweep", clientName: "QA", revision: "01",
+    projectName: "Sweep", clientName: "QA", revision: "01", fullWords: false,
     isMobile: false, isTablet: false, viewportW: 1280, heightRef: "center", override: "",
   };
   BRANDS.forEach(brand => TV_CATALOG[brand].forEach(sz => {
@@ -1348,6 +1373,13 @@ const sweepConfigs = () => {
   cfgs.push({ ...base, name: "tape-out wide TV high", brand: "Samsung", selectedSize: 98, mountSystem: "fa", dispUnits: "ftin", hasFireplace: false, showTapeOut: true, override: String(108 - tvDims(98).h / 2 - 1) });
   cfgs.push({ ...base, name: "tape-out offset TV", brand: "LG", selectedSize: 55, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false, showTapeOut: true, tvOffsetIn: -25 });
   cfgs.push({ ...base, name: "no TV, long title, narrow wall", brand: "Sony", selectedSize: null, wallW: 80, wallH: 96, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false, projectName: "Round Trip Test Estate", clientName: "R. Carter-Wellington" });
+  // FULL WORDS mode: longest labels the rail/tape/CL lanes can carry — worst
+  // with ft-in units (e.g. LOW VOLTAGE 5' - 3 1/8" ABOVE FLOOR)
+  cfgs.push({ ...base, name: "fullwords fp ftin 65", brand: "Sony", selectedSize: 65, mountSystem: "fa", dispUnits: "ftin", hasFireplace: true, fullWords: true });
+  cfgs.push({ ...base, name: "fullwords cramped 60×72", brand: "Samsung", selectedSize: 32, wallW: 60, wallH: 72, mountSystem: "fa", dispUnits: "ftin", hasFireplace: false, heightRef: "bottom", fullWords: true });
+  cfgs.push({ ...base, name: "fullwords tape-out mobile", brand: "Samsung", selectedSize: 75, mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "frac", hasFireplace: false, showTapeOut: true, isMobile: true, viewportW: 375, fullWords: true });
+  cfgs.push({ ...base, name: "fullwords TV hard right ftin", brand: "Sony", selectedSize: 55, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: false, tvOffsetIn: 33, fullWords: true });
+  cfgs.push({ ...base, name: "fullwords giant wall ftin", brand: "Samsung", selectedSize: 115, wallW: 300, wallH: 140, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: false, fullWords: true });
   // sanus full-motion + XL tilt: mount pill, big plates, depth callout
   cfgs.push({ ...base, name: "sanus FM 85 ftin", brand: "Samsung", selectedSize: 85, mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "ftin", hasFireplace: false });
   cfgs.push({ ...base, name: "sanus FM 48 fp", brand: "Sony", selectedSize: 48, mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "dec", hasFireplace: true });
@@ -1416,12 +1448,19 @@ const Icon = ({ name, size = 13 }) => {
   return <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} style={{ display: "inline-block", verticalAlign: "middle" }}>{p[name]}</svg>;
 };
 
-const Sec = ({ icon, title, children, first }) => (
-  <div style={{ marginTop: first ? 0 : 26 }}>
-    <div className="sec-title"><Icon name={icon}/> {title}</div>
-    {children}
-  </div>
-);
+const Sec = ({ icon, title, children, first, defaultOpen = true, summary }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginTop: first ? 0 : 22 }}>
+      <div className="sec-title sec-clk" onClick={() => setOpen(o => !o)}>
+        <Icon name={icon}/> {title}
+        <span className="sec-sum">{!open && summary ? summary : ""}</span>
+        <span className={`sec-chev ${open ? "" : "closed"}`}>▾</span>
+      </div>
+      {open && children}
+    </div>
+  );
+};
 
 const Field = ({ label, children, hint }) => (
   <div style={{ marginBottom: 10 }}>
@@ -1485,6 +1524,7 @@ export default function App() {
   const [showTapeOut, setShowTapeOut] = useState(SAVED.showTapeOut ?? false);
   const [showTravel, setShowTravel] = useState(SAVED.showTravel ?? true);
   const [bracketTravel, setBracketTravel] = useState(SAVED.bracketTravel ?? "1.5");
+  const [fullWords, setFullWords] = useState(SAVED.fullWords ?? false);
 
   const [mountHeightOverride, setMountHeightOverride] = useState(SAVED.mountHeightOverride ?? "");
   const [heightRef, setHeightRef] = useState(SAVED.heightRef === "bottom" ? "bottom" : "center");
@@ -1501,6 +1541,7 @@ export default function App() {
   const [importSummary, setImportSummary] = useState(null);
   const [sweep, setSweep] = useState(null);
   const [showExport, setShowExport] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
 
   useEffect(() => {
     const onResize = () => setViewportW(window.innerWidth);
@@ -1518,7 +1559,7 @@ export default function App() {
         mountSystem, sanusStyle, sanusMountModel, tvWeight,
         showBackBox, backBoxModel, autoRecommendBox, showOutlet,
         showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
-        bracketTravel, mountHeightOverride, heightRef, showAllSizes,
+        bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes,
         projectName, clientName, revision, dispUnits,
       }));
     } catch { /* storage unavailable — run without persistence */ }
@@ -1527,7 +1568,7 @@ export default function App() {
       mountSystem, sanusStyle, sanusMountModel, tvWeight,
       showBackBox, backBoxModel, autoRecommendBox, showOutlet,
       showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
-      bracketTravel, mountHeightOverride, heightRef, showAllSizes,
+      bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes,
       projectName, clientName, revision, dispUnits]);
 
   const resetAll = () => {
@@ -1594,18 +1635,18 @@ export default function App() {
     wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
     mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem,
     showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut,
-    showTravel, travelIn, projectName, clientName, revision,
+    showTravel, travelIn, fullWords, projectName, clientName, revision,
     dispUnits, isMobile, isTablet, viewportW,
   };
   const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt,
-     showBoxDims, showTvDims, showTapeOut, showTravel, travelIn,
+     showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords,
      projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
   const printSchem = useMemo(() => buildSchematic({ ...schemState, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt,
-     showBoxDims, showTvDims, showTapeOut, showTravel, travelIn,
+     showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords,
      projectName, clientName, revision, dispUnits]);
 
   const svgRef = useRef(null);
@@ -1660,7 +1701,7 @@ export default function App() {
     mountSystem, sanusStyle, sanusMountModel, tvWeight,
     showBackBox, backBoxModel, autoRecommendBox, showOutlet,
     showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
-    bracketTravel, mountHeightOverride, heightRef, showAllSizes,
+    bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes,
     projectName, clientName, revision, dispUnits,
   };
 
@@ -1733,6 +1774,7 @@ export default function App() {
     if (typeof f.showOutlet === "boolean") setShowOutlet(f.showOutlet);
     if (typeof f.showLowVolt === "boolean") setShowLowVolt(f.showLowVolt);
     if (typeof f.showVesa === "boolean") setShowVesa(f.showVesa);
+    if (typeof f.fullWords === "boolean") setFullWords(f.fullWords);
     if (typeof f.mountHeightOverride === "string") setMountHeightOverride(f.mountHeightOverride);
     if (f.heightRef === "center" || f.heightRef === "bottom") setHeightRef(f.heightRef);
     if (typeof f.projectName === "string") setProjectName(f.projectName);
@@ -1847,6 +1889,7 @@ export default function App() {
     const metaHtml = "Front Elevation · REV " + (revision || "01") + (clientName.trim() ? "<br/>" + clientName.trim() : "") + "<br/>" + today;
     const specRowsHtml = specRows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
     const partsHtml = parts.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+    const legendHtml = ABBREVIATIONS.map(([a, f]) => `<span><strong>${a}</strong> ${f}</span>`).join("");
     const vesaNote = layout.vesa && layout.vesa.spec.note ? `<p style="margin:8px 0 0 0;"><strong>${brand} ${selectedSize}":</strong> ${layout.vesa.spec.note}</p>` : "";
     const bbNote = layout.box && layout.box.note ? `<p style="margin:8px 0 0 0;"><strong>Back box:</strong> ${layout.box.note}</p>` : "";
     const ratingNote = layout.box && layout.box.underRated ? `<p style="margin:8px 0 0 0;"><strong>Check rating:</strong> ${layout.box.label} is rated ${layout.box.tvMin}"–${layout.box.tvMax}" — selected ${selectedSize}".</p>` : "";
@@ -1857,8 +1900,10 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5px solid #102A43; padding-bottom: 12px; margin-bottom: 22px; }
 .header h1 { margin: 0; font-size: 21px; letter-spacing: -0.3px; }
 .header .meta { font-size: 10px; letter-spacing: 1.5px; color: #5C7186; text-transform: uppercase; text-align: right; line-height: 1.6; }
-.schematic-wrap { text-align: center; margin-bottom: 22px; padding: 14px; background: #FBFCFE; border: 1px solid #C9D6E2; }
+.schematic-wrap { text-align: center; margin-bottom: 0; padding: 14px; background: #FBFCFE; border: 1px solid #C9D6E2; }
 .schematic-wrap svg { max-width: 100%; height: auto; }
+.legend-strip { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 0 0 22px; padding: 7px 12px; border: 1px solid #C9D6E2; border-top: none; background: #FBFCFE; font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #5C7186; }
+.legend-strip strong { color: #102A43; }
 .section-label { font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: #102A43; font-weight: 700; padding-bottom: 6px; border-bottom: 1px solid #C9D6E2; margin-bottom: 10px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 22px; }
 .spec-table { width: 100%; border-collapse: collapse; }
@@ -1874,6 +1919,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 <button class="print-btn no-print" onclick="window.print()">Print / Save as PDF</button>
 <div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">AV INSTALLATION DRAWING</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
 <div class="schematic-wrap">${svgData}</div>
+<div class="legend-strip">${legendHtml}</div>
 <div class="grid2">
 <div><div class="section-label">Specifications</div><table class="spec-table">${specRowsHtml}</table></div>
 <div>
@@ -1909,7 +1955,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   // ----- shared UI fragments -----
   const setupPanel = (
     <>
-      <Sec icon="doc" title="Project" first>
+      <Sec icon="doc" title="Project" first defaultOpen={!(SAVED.projectName)} summary={[projectName, clientName].filter(Boolean).join(" — ")}>
         <Field label="Project / Address"><input className="inp" type="text" placeholder="e.g. Smith Residence" value={projectName} onChange={e => setProjectName(e.target.value)}/></Field>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
           <Field label="Client"><input className="inp" type="text" placeholder="optional" value={clientName} onChange={e => setClientName(e.target.value)}/></Field>
@@ -1917,14 +1963,14 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         </div>
       </Sec>
 
-      <Sec icon="wall" title="Wall">
+      <Sec icon="wall" title="Wall" summary={`${wallW}" × ${wallH}"`}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <Field label="Width (in)"><input className="inp" type="number" value={wallW} onChange={e => setWallW(+e.target.value || 0)}/></Field>
           <Field label="Height (in)"><input className="inp" type="number" value={wallH} onChange={e => setWallH(+e.target.value || 0)}/></Field>
         </div>
       </Sec>
 
-      <Sec icon="fire" title="Fireplace">
+      <Sec icon="fire" title="Fireplace" summary={hasFireplace ? (hasMantel ? "yes + mantel" : "yes") : "none"}>
         <Check on={hasFireplace} onClick={() => setHasFireplace(!hasFireplace)}>Wall has fireplace</Check>
         {hasFireplace && (
           <div style={{ paddingLeft: 4, marginTop: 6 }}>
@@ -1946,7 +1992,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         )}
       </Sec>
 
-      <Sec icon="eye" title="Viewing">
+      <Sec icon="eye" title="Viewing" summary={useViewDist ? `${(viewDist / 12).toFixed(1)} ft` : "off"}>
         <Check on={useViewDist} onClick={() => setUseViewDist(!useViewDist)}>Factor viewing distance</Check>
         {useViewDist && (
           <Field label="Distance to seating (in)" hint={`${(viewDist / 12).toFixed(1)} ft — sizing guide only`}>
@@ -1955,11 +2001,11 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         )}
       </Sec>
 
-      <Sec icon="tv" title="Brand">
+      <Sec icon="tv" title="Brand" summary={brand}>
         <Seg options={BRANDS.map(b => ({ value: b, label: b }))} value={brand} onChange={(b) => { setBrand(b); setSelectedSize(null); }}/>
       </Sec>
 
-      <Sec icon="mount" title="Mount">
+      <Sec icon="mount" title="Mount" summary={mountSystem === "fa" ? "Future Automation" : `Sanus ${sanusStyle === "fullmotion" ? "full motion" : sanusStyle}`}>
         <Seg options={[{ value: "sanus", label: "Sanus Black" }, { value: "fa", label: "Future Automation" }]} value={mountSystem} onChange={setMountSystem}/>
         {mountSystem === "fa" && (
           <div className="hint" style={{ marginTop: 6, marginBottom: 14 }}>
@@ -2047,7 +2093,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         )}
       </Sec>
 
-      <Sec icon="box" title="Back Box">
+      <Sec icon="box" title="Back Box" summary={showBackBox ? (layout?.box?.label || "on") : "off"}>
         <Check on={showBackBox} onClick={() => setShowBackBox(!showBackBox)}>Include back box</Check>
         {showBackBox && (
           <>
@@ -2084,7 +2130,6 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
                 <strong>Check rating:</strong> {layout.box.label} is rated for {layout.box.tvMin}"–{layout.box.tvMax}" TVs — selected {selectedSize}". Verify bracket compatibility.
               </div>
             )}
-            <Check on={showBoxDims} onClick={() => setShowBoxDims(!showBoxDims)}>Box rough-in dims (bottom edge)</Check>
             {mountSystem === "fa" && layout?.box?.brand === "Future Automation" && (
               <>
                 <Check on={showTravel} onClick={() => setShowTravel(!showTravel)}>Show bracket vertical range</Check>
@@ -2099,25 +2144,14 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         )}
       </Sec>
 
-      <Sec icon="plug" title="Electrical">
-        <Check on={showOutlet} onClick={() => setShowOutlet(!showOutlet)}>Recessed outlet</Check>
-        <Check on={showLowVolt} onClick={() => setShowLowVolt(!showLowVolt)}>Low-voltage feed</Check>
-      </Sec>
-
-      <Sec icon="tv" title="Drawing">
-        <Check on={showTvDims} onClick={() => setShowTvDims(!showTvDims)}>TV W × H dimensions</Check>
-        <Check on={showTapeOut} onClick={() => setShowTapeOut(!showTapeOut)}>Tape-out mode (wall tape lines)</Check>
-      </Sec>
-
-      {showVesa !== null && (
-        <Sec icon="bolt" title="VESA">
-          <Check on={showVesa} onClick={() => setShowVesa(!showVesa)}>Show VESA on drawing</Check>
-          {showVesa && selectedSize && !vesaSpec && (
-            <div className="note-box">
+      {selectedSize && (
+        <Sec icon="bolt" title="VESA" summary={vesaSpec ? `${vesaSpec.w_mm}×${vesaSpec.h_mm}` : "no data"}>
+          {!vesaSpec && (
+            <div className="note-box" style={{ marginTop: 0 }}>
               <strong>No VESA data for this panel</strong> — pattern not published yet{TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : ""}. Pull it from the TV's spec sheet before rough-in.
             </div>
           )}
-          {showVesa && selectedSize && vesaSpec && (
+          {vesaSpec && (
             <div className="vesa-box">
               <div className="rec-tag">{brand.toUpperCase()} {selectedSize}" · 2024/25</div>
               <div style={{ fontWeight: 600, fontSize: 13 }}>{vesaSpec.w_mm} × {vesaSpec.h_mm} mm</div>
@@ -2136,10 +2170,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     <div className="size-strip-wrap">
       <div className="size-strip-head">
         <span className="strip-title">{showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`}</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button className={`chip ${showTapeOut ? "on" : ""}`} onClick={() => setShowTapeOut(!showTapeOut)} title="Show the tape lines to mark the TV on the real wall">TAPE-OUT</button>
-          <button className={`chip ${showAllSizes ? "on" : ""}`} onClick={() => setShowAllSizes(!showAllSizes)}>SHOW ALL</button>
-        </div>
+        <button className={`chip ${showAllSizes ? "on" : ""}`} onClick={() => setShowAllSizes(!showAllSizes)}>SHOW ALL</button>
       </div>
       <div className="size-strip">
         {(showAllSizes ? TV_CATALOG[brand] : recommendations).map(sz => {
@@ -2167,6 +2198,34 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
           {computeFitIssues(selectedSize, engineInputs).length === 0 && <div>Outside typical proportional guidelines for this wall.</div>}
         </div>
       )}
+    </div>
+  );
+
+  // display toggles live next to the drawing they affect; PWR/LV also feed
+  // the parts list and PDF spec rows, same as they always did
+  const toggleStrip = (
+    <div className="toggle-strip">
+      <span className="strip-title">SHOW</span>
+      <button className={`chip ${showOutlet ? "on" : ""}`} onClick={() => setShowOutlet(!showOutlet)} title="Recessed power outlet — drawing, parts list, PDF">PWR</button>
+      <button className={`chip ${showLowVolt ? "on" : ""}`} onClick={() => setShowLowVolt(!showLowVolt)} title="Low-voltage feed — drawing, parts list, PDF">LV</button>
+      <button className={`chip ${showVesa ? "on" : ""}`} onClick={() => setShowVesa(!showVesa)} title="VESA pattern on the drawing">VESA</button>
+      <button className={`chip ${showTvDims ? "on" : ""}`} onClick={() => setShowTvDims(!showTvDims)} title="TV width × height dimension line">TV DIMS</button>
+      {showBackBox && <button className={`chip ${showBoxDims ? "on" : ""}`} onClick={() => setShowBoxDims(!showBoxDims)} title="Back-box rough-in dims (bottom edge)">BOX DIMS</button>}
+      <button className={`chip ${showTapeOut ? "on" : ""}`} onClick={() => setShowTapeOut(!showTapeOut)} title="Tape lines to mark the TV on the real wall">TAPE-OUT</button>
+      <span className="strip-sep"/>
+      <button className={`chip ${fullWords ? "on" : ""}`} onClick={() => setFullWords(!fullWords)} title="Spell out abbreviations on the drawing and PDF">FULL WORDS</button>
+      <button className={`chip ${showLegend ? "on" : ""}`} onClick={() => setShowLegend(!showLegend)} title="What the abbreviations mean">LEGEND</button>
+    </div>
+  );
+
+  const legendPanel = showLegend && (
+    <div className="legend-box">
+      <div className="rec-tag">ABBREVIATIONS</div>
+      <div className="legend-grid">
+        {ABBREVIATIONS.map(([a, full]) => (
+          <div key={a} className="legend-row"><span className="legend-abbr">{a}</span><span>{full}</span></div>
+        ))}
+      </div>
     </div>
   );
 
@@ -2352,12 +2411,17 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--ink); }
-        .app { min-height: 100vh; background: var(--ink); color: var(--txt); font-family: var(--fd); }
+        .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--ink); color: var(--txt); font-family: var(--fd); }
         .hdr { display: flex; justify-content: space-between; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; gap: 10px; }
         .hdr h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; margin: 0; }
         .hdr .sub { font-family: var(--fm); font-size: 9px; letter-spacing: 2px; color: var(--txt3); margin-top: 2px; }
         .hdr-proj { font-family: var(--fm); font-size: 11px; color: var(--txt2); }
         .sec-title { font-family: var(--fm); font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--txt2); font-weight: 600; padding-bottom: 7px; border-bottom: 1px solid var(--line); margin-bottom: 12px; display: flex; align-items: center; gap: 7px; }
+        .sec-clk { cursor: pointer; user-select: none; -webkit-user-select: none; }
+        .sec-clk:hover { color: var(--txt); }
+        .sec-sum { flex: 1; min-width: 0; text-align: right; color: var(--txt3); letter-spacing: 0.5px; text-transform: none; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sec-chev { color: var(--txt3); transition: transform .15s; flex-shrink: 0; }
+        .sec-chev.closed { transform: rotate(-90deg); }
         .lbl { font-family: var(--fm); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--txt3); margin-bottom: 5px; }
         .hint { font-family: var(--fm); font-size: 10px; color: var(--txt3); margin-top: 4px; line-height: 1.5; }
         .inp { width: 100%; padding: 9px 11px; border: 1px solid var(--line2); background: var(--ink2); font-family: var(--fm); font-size: 15px; color: var(--txt); outline: none; border-radius: 4px; min-height: 42px; transition: border-color .15s; -webkit-appearance: none; appearance: none; }
@@ -2429,7 +2493,16 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .tab { flex: 1; padding: 13px 8px; border: none; background: transparent; border-bottom: 2px solid transparent; font-family: var(--fm); font-size: 10px; letter-spacing: 2px; cursor: pointer; color: var(--txt3); font-weight: 600; }
         .tab.on { color: var(--txt); border-bottom-color: var(--acc); }
         .sidebar { border-right: 1px solid var(--line); padding: 20px; overflow-y: auto; background: var(--ink); }
-        .main-col { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .main-col { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-y: auto; }
+        .toggle-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .strip-sep { width: 1px; height: 16px; background: var(--line2); margin: 0 4px; }
+        .legend-box { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line2); border-radius: 5px; }
+        .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 18px; margin-top: 6px; }
+        .legend-row { display: flex; gap: 8px; font-family: var(--fm); font-size: 10.5px; color: var(--txt2); padding: 2px 0; }
+        .legend-abbr { color: var(--acc); font-weight: 700; min-width: 68px; flex-shrink: 0; }
+        .mini-preview { position: sticky; top: -20px; z-index: 30; margin: -20px -20px 16px; padding: 10px 14px 7px; background: var(--ink); border-bottom: 1px solid var(--line2); cursor: pointer; }
+        .mini-preview svg { display: block; width: 100%; height: auto; max-height: 130px; }
+        .mini-tag { font-family: var(--fm); font-size: 8px; letter-spacing: 1.5px; color: var(--txt3); text-align: center; margin-top: 4px; }
         input[type="number"] { -moz-appearance: textfield; }
         input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         ::-webkit-scrollbar { height: 8px; width: 8px; }
@@ -2456,14 +2529,25 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : (isTablet ? "290px 1fr" : "320px 1fr"), minHeight: "calc(100vh - 70px)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : (isTablet ? "290px 1fr" : "320px 1fr"), flex: 1, minHeight: 0 }}>
         <aside className="sidebar" style={{ display: isMobile && activePanel !== "setup" ? "none" : "block" }}>
+          {isMobile && layout && (
+            <div className="mini-preview" onClick={() => setActivePanel("drawing")}>
+              <svg viewBox={`0 0 ${screenSchem.svgW} ${screenSchem.svgH}`} preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill={SCREEN_PALETTE.canvas}/>
+                {screenSchem.elements}
+              </svg>
+              <div className="mini-tag">LIVE PREVIEW — TAP FOR FULL DRAWING</div>
+            </div>
+          )}
           {setupPanel}
         </aside>
 
         <main className="main-col" style={{ display: isMobile && activePanel !== "drawing" ? "none" : "flex" }}>
           {importBanner}
           {sizeStrip}
+          {toggleStrip}
+          {legendPanel}
           {canvas}
           {statusBar}
           {isMobile && <div style={{ display: "flex", justifyContent: "center" }}>{exportBtns}</div>}
