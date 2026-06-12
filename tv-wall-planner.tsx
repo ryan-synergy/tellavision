@@ -1,0 +1,2100 @@
+import { useState, useMemo, useRef, useEffect } from "react";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 1 — DATA
+// Domain tables. Sizes in inches unless suffixed _mm.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TV_CATALOG = {
+  Sony:    [42, 43, 48, 50, 55, 65, 75, 77, 85, 98, 100],
+  Samsung: [32, 43, 50, 55, 65, 75, 77, 83, 85, 98, 100, 115],
+  LG:      [42, 48, 55, 65, 77, 83, 97],
+};
+
+const BRANDS = Object.keys(TV_CATALOG);
+
+const BACK_BOXES = {
+  "FA-WB16-2S": { brand: "Future Automation", line: "WB", w: 25.3, h: 16.3, d: 3.8, label: "WB16-2S", bracket: "PS40", tvMin: 32, tvMax: 43 },
+  "FA-WB21":    { brand: "Future Automation", line: "WB", w: 21.9, h: 14.8, d: 3.8, label: "WB21",    bracket: "PS40", tvMin: 40, tvMax: 55 },
+  "FA-WB21-2S": { brand: "Future Automation", line: "WB", w: 21.9, h: 14.8, d: 3.8, label: "WB21-2S (twin stud)", bracket: "PS40", tvMin: 40, tvMax: 55 },
+  "FA-WB26":    { brand: "Future Automation", line: "WB", w: 26.9, h: 14.8, d: 3.8, label: "WB26",    bracket: "PS40/PS55", tvMin: 50, tvMax: 65 },
+  "FA-WB26-2S": { brand: "Future Automation", line: "WB", w: 26.9, h: 14.8, d: 3.8, label: "WB26-2S (twin stud)", bracket: "PS40/PS55", tvMin: 50, tvMax: 65 },
+  "FA-WB31":    { brand: "Future Automation", line: "WB", w: 31.9, h: 14.8, d: 3.8, label: "WB31",    bracket: "PS40/PS55/PS65", tvMin: 60, tvMax: 75 },
+  "FA-WB31-2S": { brand: "Future Automation", line: "WB", w: 31.9, h: 14.8, d: 3.8, label: "WB31-2S (twin stud)", bracket: "PS40/PS55/PS65", tvMin: 60, tvMax: 75 },
+  "FA-WB80":    { brand: "Future Automation", line: "WB", w: 36.0, h: 20.0, d: 5.5, label: "WB80",    bracket: "PS80", tvMin: 75, tvMax: 98 },
+  "SB-RBX-8":     { brand: "SnapAV Strong", line: "VersaBox",     w: 14.0, h: 8.0,  d: 3.9, label: "VersaBox 8x14",     bracket: "Razor", tvMin: 32, tvMax: 65 },
+  "SB-RBX-14":    { brand: "SnapAV Strong", line: "VersaBox",     w: 14.0, h: 14.0, d: 3.9, label: "VersaBox 14x14",    bracket: "Razor", tvMin: 50, tvMax: 85 },
+  "SB-RBX-PRO-8": { brand: "SnapAV Strong", line: "VersaBox Pro", w: 14.0, h: 8.0,  d: 3.9, label: "VersaBox Pro 8x14", bracket: "Razor", tvMin: 32, tvMax: 65 },
+  "SB-RBX-PRO-14":{ brand: "SnapAV Strong", line: "VersaBox Pro", w: 14.0, h: 14.0, d: 3.9, label: "VersaBox Pro 14x14",bracket: "Razor", tvMin: 50, tvMax: 85 },
+  "SB-RBX-PRO-XL":{ brand: "SnapAV Strong", line: "VersaBox Pro", w: 20.0, h: 14.0, d: 3.9, label: "VersaBox Pro XL 14x20", bracket: "Razor", tvMin: 65, tvMax: 98, note: "Fits Samsung One Connect 8K" },
+};
+
+const VESA_DATA = {
+  Sony: {
+    42: { w_mm: 100, h_mm: 100, screw: "M4", voffset_pct: 0, note: "Verify - small sizes vary by series" },
+    43: { w_mm: 200, h_mm: 200, screw: "M6", voffset_pct: 0 },
+    48: { w_mm: 300, h_mm: 300, screw: "M6", voffset_pct: -5, note: "OLED - pattern biased low" },
+    50: { w_mm: 200, h_mm: 200, screw: "M6", voffset_pct: 0 },
+    55: { w_mm: 300, h_mm: 300, screw: "M6", voffset_pct: -3 },
+    65: { w_mm: 300, h_mm: 300, screw: "M6", voffset_pct: -3 },
+    75: { w_mm: 300, h_mm: 300, screw: "M6", voffset_pct: 0 },
+    77: { w_mm: 300, h_mm: 300, screw: "M6", voffset_pct: -5, note: "OLED - pattern biased low" },
+    85: { w_mm: 400, h_mm: 400, screw: "M8", voffset_pct: 0 },
+    98: { w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
+    100:{ w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
+  },
+  Samsung: {
+    32: { w_mm: 100, h_mm: 100, screw: "M8", voffset_pct: 0 },
+    43: { w_mm: 200, h_mm: 200, screw: "M8", voffset_pct: 0 },
+    50: { w_mm: 200, h_mm: 200, screw: "M8", voffset_pct: 0 },
+    55: { w_mm: 300, h_mm: 300, screw: "M8", voffset_pct: 0, note: "OLED 300x300, Neo QLED 400x300" },
+    65: { w_mm: 400, h_mm: 300, screw: "M8", voffset_pct: -3 },
+    75: { w_mm: 400, h_mm: 300, screw: "M8", voffset_pct: 0 },
+    77: { w_mm: 400, h_mm: 400, screw: "M8", voffset_pct: -3, note: "OLED only - biased low" },
+    83: { w_mm: 400, h_mm: 400, screw: "M8", voffset_pct: -3, note: "S95F OLED" },
+    85: { w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
+    98: { w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
+    100:{ w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
+    115:{ w_mm: 800, h_mm: 600, screw: "M8", voffset_pct: 0, note: "QN90F - confirm with spec sheet" },
+  },
+  LG: {
+    42: { w_mm: 300, h_mm: 200, screw: "M6", voffset_pct: -8, note: "OLED - pattern biased low" },
+    48: { w_mm: 300, h_mm: 200, screw: "M6", voffset_pct: -8, note: "OLED - pattern biased low" },
+    55: { w_mm: 300, h_mm: 200, screw: "M6", voffset_pct: -10, note: "C5: bottom holes ~9in from bottom edge" },
+    65: { w_mm: 300, h_mm: 200, screw: "M6", voffset_pct: -10, note: "C5: bottom holes ~9in from bottom edge" },
+    77: { w_mm: 300, h_mm: 200, screw: "M6", voffset_pct: -10, note: "C5: pattern offset low for weight distribution" },
+    83: { w_mm: 400, h_mm: 400, screw: "M8", voffset_pct: -5, note: "Larger pattern - closer to center" },
+    97: { w_mm: 600, h_mm: 400, screw: "M8", voffset_pct: 0 },
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 2 — ENGINE
+// Pure functions only: inches in, inches out. No React, no DOM, no rounding.
+// Display rounding happens at render via fmtIn(). The UI must never do
+// arithmetic — every number on screen reads a field computed here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Gap between TV bottom edge and mantel top / firebox opening top, in inches.
+const CLEARANCE = { mantel: 8, noMantel: 10 };
+
+// 16:9 panel + ~1.2" bezel allowance. Constants are 16/sqrt(337), 9/sqrt(337).
+const tvDims = (size) => ({ w: size * 0.872 + 1.2, h: size * 0.490 + 1.2 });
+
+const mmToIn = (mm) => mm / 25.4;
+
+const recommendBackBox = (tvSize, mountType, brand) => {
+  if (!tvSize) return null;
+  const samsung8K = brand === "Samsung" && tvSize >= 65;
+  if (mountType === "articulating") {
+    if (tvSize <= 43) return "FA-WB16-2S";
+    if (tvSize <= 55) return "FA-WB21";
+    if (tvSize <= 65) return "FA-WB26";
+    if (tvSize <= 75) return "FA-WB31";
+    return "FA-WB80";
+  }
+  if (samsung8K) return "SB-RBX-PRO-XL";
+  if (tvSize <= 55) return "SB-RBX-PRO-8";
+  if (tvSize > 85) return "SB-RBX-PRO-XL";
+  return "SB-RBX-PRO-14";
+};
+
+// --- display formatting (display-only; engine math stays full precision) ---
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+
+const fmtIn = (v, mode = "dec") => {
+  if (v == null || isNaN(v)) return "—";
+  if (mode === "dec") return `${v.toFixed(1)}"`;
+  const neg = v < 0 ? "-" : "";
+  const av = Math.abs(v);
+  const fracParts = (x) => {
+    let whole = Math.floor(x);
+    let num = Math.round((x - whole) * 8);
+    let den = 8;
+    if (num === 8) { whole += 1; num = 0; }
+    if (num > 0) { const g = gcd(num, den); num /= g; den /= g; }
+    return [whole, num, den];
+  };
+  if (mode === "frac") {
+    const [w, n, d] = fracParts(av);
+    if (n === 0) return `${neg}${w}"`;
+    return w === 0 ? `${neg}${n}/${d}"` : `${neg}${w}-${n}/${d}"`;
+  }
+  // "ftin"
+  let ft = Math.floor(av / 12);
+  let [w, n, d] = fracParts(av - ft * 12);
+  if (w === 12) { ft += 1; w = 0; }
+  if (ft === 0) return fmtIn(neg ? -av : av, "frac");
+  const inch = n === 0 ? `${w}` : `${w} ${n}/${d}`;
+  return `${neg}${ft}'-${inch}"`;
+};
+
+const computeTvCL = ({ wallW, hasFireplace, fbOffsetIn, tvOffsetIn }) =>
+  wallW / 2 + (hasFireplace ? fbOffsetIn : 0) + tvOffsetIn;
+
+const computeRecommendedCenterH = ({ selectedSize, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist }) => {
+  if (!selectedSize) return 42;
+  const { h: tvH } = tvDims(selectedSize);
+  if (hasFireplace && hasMantel) return mantelH + CLEARANCE.mantel + tvH / 2;
+  if (hasFireplace && !hasMantel) return fbOpeningH + CLEARANCE.noMantel + tvH / 2;
+  let base = 42;
+  if (useViewDist && viewDist > 144) base = 44;
+  if (useViewDist && viewDist > 192) base = 46;
+  return base;
+};
+
+const computeCenterH = ({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize }) => {
+  if (!mountHeightOverride) return recommendedCenterH;
+  const val = parseFloat(mountHeightOverride);
+  if (isNaN(val)) return recommendedCenterH;
+  if (heightRef === "bottom" && selectedSize) return val + tvDims(selectedSize).h / 2;
+  return val;
+};
+
+// Convert a height override between center- and bottom-reference, preserving
+// the physical TV position. Full precision; caller rounds for display.
+const convertOverride = (value, toRef, selectedSize) => {
+  if (!selectedSize || isNaN(value)) return null;
+  const half = tvDims(selectedSize).h / 2;
+  return toRef === "bottom" ? value - half : value + half;
+};
+
+// All geometry in inches. X measured from the LEFT WALL EDGE, heights are
+// AFF (above finished floor). Single source of truth for schematic, status
+// bar, spec panel, and PDF.
+const computeLayout = ({ selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountType }) => {
+  if (!selectedSize) return null;
+  const { w: tvW, h: tvH } = tvDims(selectedSize);
+  const tvLeft = tvCL - tvW / 2;
+  const tvRight = tvCL + tvW / 2;
+  const tvTop = centerH + tvH / 2;
+  const tvBottom = centerH - tvH / 2;
+
+  const vesaSpec = VESA_DATA[brand]?.[selectedSize] || null;
+  let vesa = null;
+  if (vesaSpec) {
+    vesa = {
+      w: mmToIn(vesaSpec.w_mm),
+      h: mmToIn(vesaSpec.h_mm),
+      // negative voffset_pct = pattern biased low on the panel
+      aff: centerH + (vesaSpec.voffset_pct / 100) * tvH,
+      spec: vesaSpec,
+    };
+  }
+
+  let box = null;
+  if (showBackBox && BACK_BOXES[effectiveBoxModel]) {
+    const bb = BACK_BOXES[effectiveBoxModel];
+    const anchorAFF = vesa ? vesa.aff : centerH;
+    let cx;
+    if (mountType === "articulating" && bb.brand === "Future Automation") {
+      cx = tvCL; // FA boxes sit behind the bracket, centered on VESA
+    } else {
+      const vesaHalfW = vesa ? vesa.w / 2 : 0;
+      cx = tvCL + vesaHalfW + 3 + bb.w / 2;
+      if (cx + bb.w / 2 > tvRight - 0.5) {
+        const leftCx = tvCL - vesaHalfW - 3 - bb.w / 2;
+        if (leftCx - bb.w / 2 >= tvLeft + 0.5) cx = leftCx;
+      }
+    }
+    const extendsOff =
+      cx - bb.w / 2 < tvLeft || cx + bb.w / 2 > tvRight ||
+      anchorAFF + bb.h / 2 > tvTop || anchorAFF - bb.h / 2 < tvBottom;
+    const underRated = selectedSize < bb.tvMin || selectedSize > bb.tvMax;
+    box = { ...bb, model: effectiveBoxModel, cx, aff: anchorAFF, extendsOff, underRated };
+  }
+
+  // Electrical rough-in: inside the back box when there is one, otherwise
+  // tucked behind the panel just right of the VESA plate.
+  let outlet, lv;
+  if (box) {
+    const y = box.aff - box.h / 2 + Math.min(2.5, box.h / 2);
+    outlet = { x: box.cx - box.w * 0.25, aff: y };
+    lv = { x: box.cx + box.w * 0.25, aff: y };
+  } else {
+    const y = vesa ? vesa.aff : centerH;
+    outlet = { x: tvCL + 4, aff: y };
+    lv = { x: tvCL + 8, aff: y };
+  }
+
+  return { tvW, tvH, tvCL, tvLeft, tvRight, tvTop, tvBottom, vesa, box, outlet, lv, centerH };
+};
+
+// Reasons a size fails the proportional/clearance guidelines (size cards +
+// warning panel). Empty array = recommended fit.
+const computeFitIssues = (sz, { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH }) => {
+  const { w, h } = tvDims(sz);
+  const maxByWall = wallW * 0.65;
+  const minByWall = wallW * 0.35;
+  const issues = [];
+  if (w > maxByWall) issues.push(`TV width (${w.toFixed(1)}") exceeds 65% of wall (${maxByWall.toFixed(1)}" max)`);
+  if (w < minByWall) issues.push(`TV width (${w.toFixed(1)}") is below 35% of wall (${minByWall.toFixed(1)}" min)`);
+  if (hasFireplace && hasMantel) {
+    const available = wallH - mantelH - CLEARANCE.mantel;
+    if (h > available) issues.push(`TV height (${h.toFixed(1)}") exceeds mantel clearance (${available.toFixed(1)}" available)`);
+  }
+  if (hasFireplace && !hasMantel) {
+    const available = wallH - fbOpeningH - CLEARANCE.noMantel;
+    if (h > available) issues.push(`TV height (${h.toFixed(1)}") exceeds firebox clearance (${available.toFixed(1)}" available)`);
+  }
+  return issues;
+};
+
+const computeRecommendations = ({ brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist }) => {
+  const sizes = TV_CATALOG[brand];
+  let candidates = sizes.filter(sz =>
+    computeFitIssues(sz, { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH }).length === 0
+  );
+  if (useViewDist) {
+    const ideal = viewDist / 1.6;
+    candidates = candidates.slice().sort((a, b) => Math.abs(a - ideal) - Math.abs(b - ideal));
+  }
+  return candidates.slice(0, 4);
+};
+
+const computePlacementIssues = ({ layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn }) => {
+  const issues = [];
+  if (layout) {
+    if (layout.tvBottom < 0) issues.push(`TV bottom is ${layout.tvBottom < 0 ? (-layout.tvBottom).toFixed(1) : 0}" below the floor`);
+    if (layout.tvTop > wallH) issues.push(`TV top is ${(layout.tvTop - wallH).toFixed(1)}" above the wall`);
+    if (layout.tvLeft < 0) issues.push(`TV extends ${(-layout.tvLeft).toFixed(1)}" past the left wall edge`);
+    if (layout.tvRight > wallW) issues.push(`TV extends ${(layout.tvRight - wallW).toFixed(1)}" past the right wall edge`);
+  }
+  // Audit finding: the legacy build let the fireplace slide off the wall
+  // silently. Firebox must sit fully on the wall.
+  if (hasFireplace) {
+    const fbLeft = wallW / 2 + fbOffsetIn - fbOpeningW / 2;
+    const fbRight = wallW / 2 + fbOffsetIn + fbOpeningW / 2;
+    if (fbLeft < 0) issues.push(`Firebox extends ${(-fbLeft).toFixed(1)}" past the left wall edge`);
+    if (fbRight > wallW) issues.push(`Firebox extends ${(fbRight - wallW).toFixed(1)}" past the right wall edge`);
+  }
+  return issues;
+};
+
+const buildPartsList = ({ layout, mountType, showOutlet, showLowVolt }) => {
+  if (!layout) return [];
+  const rows = [];
+  if (layout.box) {
+    rows.push([`Back box`, `${layout.box.brand} ${layout.box.label}`]);
+    rows.push([`Bracket`, `${layout.box.bracket} series (${mountType === "flat" ? "flat" : "articulating"})`]);
+  } else {
+    rows.push([`Mount`, mountType === "flat" ? "Low-profile flat mount" : "Articulating mount"]);
+  }
+  if (layout.vesa) rows.push([`VESA hardware`, `4× ${layout.vesa.spec.screw} screws (${layout.vesa.spec.w_mm}×${layout.vesa.spec.h_mm} pattern)`]);
+  if (showOutlet) rows.push([`Power`, `1× recessed outlet kit`]);
+  if (showLowVolt) rows.push([`Low voltage`, `1× LV mounting bracket + wall plate`]);
+  return rows;
+};
+
+// --- persistence ---
+const STORAGE_KEY = "tv-wall-planner-v1"; // unchanged: legacy designs load
+const loadSaved = () => {
+  try {
+    if (typeof window === "undefined") return {};
+    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+};
+const SAVED = loadSaved();
+const SAVED_BRAND = BRANDS.includes(SAVED.brand) ? SAVED.brand : "Sony";
+const SAVED_SIZE = TV_CATALOG[SAVED_BRAND].includes(SAVED.selectedSize) ? SAVED.selectedSize : null;
+
+// --- JSON interop --------------------------------------------------------
+// Export carries both the editable design AND the computed numbers so
+// downstream apps can consume results without reimplementing the engine.
+const buildExportJSON = (design, layout) => ({
+  app: "tv-wall-planner",
+  schema: 1,
+  exportedAt: new Date().toISOString(),
+  design,
+  computed: layout ? {
+    tvWidthIn: layout.tvW, tvHeightIn: layout.tvH,
+    tvCenterlineFromLeftIn: layout.tvCL,
+    centerAFFIn: layout.centerH, bottomAFFIn: layout.tvBottom, topAFFIn: layout.tvTop,
+    vesa: layout.vesa ? { w_mm: layout.vesa.spec.w_mm, h_mm: layout.vesa.spec.h_mm, screw: layout.vesa.spec.screw, centerAFFIn: layout.vesa.aff } : null,
+    backBox: layout.box ? { model: layout.box.model, label: layout.box.label, brand: layout.box.brand, bracket: layout.box.bracket, centerFromLeftIn: layout.box.cx, centerAFFIn: layout.box.aff } : null,
+    outlet: layout.outlet ? { fromLeftIn: layout.outlet.x, AFFIn: layout.outlet.aff } : null,
+    lowVoltage: layout.lv ? { fromLeftIn: layout.lv.x, AFFIn: layout.lv.aff } : null,
+  } : null,
+});
+
+// --- DXF export (Visio / AutoCAD / Bluebeam) ------------------------------
+// R12 ASCII DXF: the most universally importable CAD format. Geometry is at
+// TRUE SCALE in inches — origin at the left wall edge on the floor, Y up —
+// which is exactly the engine's coordinate system (X from left, AFF up).
+const DXF_LAYERS = [
+  ["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2],
+  ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30],
+  ["DIMENSIONS", 7], ["CENTERLINE", 1], ["NOTES", 7],
+];
+
+const buildDXF = (S, layout) => {
+  if (!layout) return null;
+  const fmt = (v) => fmtIn(v, S.dispUnits);
+  const out = [];
+  const P = (code, val) => { out.push(String(code)); out.push(String(val)); };
+  const esc = (s) => String(s).replace(/×/g, "x").replace(/[—–]/g, "-").replace(/[^\x20-\x7E]/g, "");
+  const est = (s, h) => String(s).length * h * 0.8; // rough text width
+  const line = (layer, x1, y1, x2, y2) => { P(0, "LINE"); P(8, layer); P(10, x1.toFixed(4)); P(20, y1.toFixed(4)); P(30, "0.0"); P(11, x2.toFixed(4)); P(21, y2.toFixed(4)); P(31, "0.0"); };
+  const rect = (layer, x, y, w, h) => { line(layer, x, y, x + w, y); line(layer, x + w, y, x + w, y + h); line(layer, x + w, y + h, x, y + h); line(layer, x, y + h, x, y); };
+  const circle = (layer, cx, cy, r) => { P(0, "CIRCLE"); P(8, layer); P(10, cx.toFixed(4)); P(20, cy.toFixed(4)); P(30, "0.0"); P(40, r.toFixed(4)); };
+  const text = (layer, x, y, h, s) => { P(0, "TEXT"); P(8, layer); P(10, x.toFixed(4)); P(20, y.toFixed(4)); P(30, "0.0"); P(40, h.toFixed(4)); P(1, esc(s)); };
+  const textC = (layer, cx, y, h, s) => text(layer, cx - est(s, h) / 2, y, h, s);
+  const textR = (layer, xRight, y, h, s) => text(layer, xRight - est(s, h), y, h, s);
+  // dash-dot centerline drawn as real segments (no linetype dependencies)
+  const dashDot = (layer, x, y1, y2) => {
+    let y = y1;
+    while (y < y2) {
+      const d1 = Math.min(2.5, y2 - y); line(layer, x, y, x, y + d1); y += d1 + 0.8;
+      if (y >= y2) break;
+      const d2 = Math.min(0.4, y2 - y); line(layer, x, y, x, y + d2); y += d2 + 0.8;
+    }
+  };
+
+  // ---- file skeleton ----
+  P(0, "SECTION"); P(2, "HEADER"); P(9, "$ACADVER"); P(1, "AC1009"); P(0, "ENDSEC");
+  P(0, "SECTION"); P(2, "TABLES");
+  P(0, "TABLE"); P(2, "LTYPE"); P(70, 1);
+  P(0, "LTYPE"); P(2, "CONTINUOUS"); P(70, 0); P(3, "Solid line"); P(72, 65); P(73, 0); P(40, "0.0");
+  P(0, "ENDTAB");
+  P(0, "TABLE"); P(2, "LAYER"); P(70, DXF_LAYERS.length);
+  DXF_LAYERS.forEach(([name, color]) => { P(0, "LAYER"); P(2, name); P(70, 0); P(62, color); P(6, "CONTINUOUS"); });
+  P(0, "ENDTAB");
+  P(0, "ENDSEC");
+  P(0, "SECTION"); P(2, "ENTITIES");
+
+  const { wallW, wallH } = S;
+
+  // wall + floor + hatch ticks
+  rect("WALL", 0, 0, wallW, wallH);
+  line("WALL", -6, 0, wallW + 6, 0);
+  for (let i = 0; i <= 12; i++) {
+    const x = -5 + i * ((wallW + 10) / 12);
+    line("WALL", x, 0, x - 1.5, -1.5);
+  }
+
+  // fireplace
+  if (S.hasFireplace) {
+    const fbLeft = wallW / 2 + S.fbOffsetIn - S.fbOpeningW / 2;
+    rect("FIREPLACE", fbLeft, 0, S.fbOpeningW, S.fbOpeningH);
+    if (S.fbOpeningW > 4 && S.fbOpeningH > 4) rect("FIREPLACE", fbLeft + 1.5, 1.5, S.fbOpeningW - 3, S.fbOpeningH - 3);
+    if (S.hasMantel) rect("FIREPLACE", fbLeft - 12, S.mantelH - S.mantelDepth, S.fbOpeningW + 24, S.mantelDepth);
+  }
+
+  // TV
+  rect("TV", layout.tvLeft, layout.tvBottom, layout.tvW, layout.tvH);
+  rect("SCREEN", layout.tvLeft + 0.8, layout.tvBottom + 0.8, layout.tvW - 1.6, layout.tvH - 1.6);
+  text("TV", layout.tvLeft + 1.5, layout.tvTop - 3.2, 1.6, `${S.brand.toUpperCase()} ${S.selectedSize}"`);
+
+  // VESA + mount
+  if (layout.vesa) {
+    if (S.showVesa) {
+      const v = layout.vesa;
+      rect("VESA", layout.tvCL - v.w / 2, v.aff - v.h / 2, v.w, v.h);
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sy]) =>
+        circle("VESA", layout.tvCL + sx * v.w / 2, v.aff + sy * v.h / 2, 0.25));
+    }
+    const mw = layout.vesa.w + (S.mountType === "flat" ? 2 : 3);
+    const mh = S.mountType === "flat" ? 3.5 : layout.vesa.h + 2;
+    rect("MOUNT", layout.tvCL - mw / 2, layout.vesa.aff - mh / 2, mw, mh);
+  }
+
+  // back box
+  if (layout.box) rect("BACKBOX", layout.box.cx - layout.box.w / 2, layout.box.aff - layout.box.h / 2, layout.box.w, layout.box.h);
+
+  // electrical
+  if (S.showOutlet) {
+    rect("ELECTRICAL", layout.outlet.x - 2, layout.outlet.aff - 2, 4, 4);
+    circle("ELECTRICAL", layout.outlet.x - 0.8, layout.outlet.aff, 0.35);
+    circle("ELECTRICAL", layout.outlet.x + 0.8, layout.outlet.aff, 0.35);
+  }
+  if (S.showLowVolt) {
+    rect("LOWVOLT", layout.lv.x - 2, layout.lv.aff - 2, 4, 4);
+    text("LOWVOLT", layout.lv.x - 1.1, layout.lv.aff - 0.6, 1.2, "LV");
+  }
+
+  // ---- dimensions (lines + ticks + text, true scale) ----
+  const refAFF = S.heightRef === "bottom" ? layout.tvBottom : layout.centerH;
+  const refLabel = S.heightRef === "bottom" ? "TO TV BOTTOM" : "TO TV CENTER";
+  line("DIMENSIONS", -6, 0, -6, refAFF);
+  line("DIMENSIONS", -7, 0, -5, 0);
+  line("DIMENSIONS", -7, refAFF, -5, refAFF);
+  textR("DIMENSIONS", -8, refAFF / 2, 2.5, fmt(refAFF));
+  textR("DIMENSIONS", -8, refAFF / 2 - 3.4, 1.2, refLabel);
+  line("CENTERLINE", layout.tvLeft - 3, refAFF, layout.tvLeft, refAFF);
+  line("CENTERLINE", layout.tvRight, refAFF, layout.tvRight + 3, refAFF);
+
+  line("DIMENSIONS", layout.tvLeft, layout.tvTop + 4, layout.tvRight, layout.tvTop + 4);
+  line("DIMENSIONS", layout.tvLeft, layout.tvTop + 3, layout.tvLeft, layout.tvTop + 5);
+  line("DIMENSIONS", layout.tvRight, layout.tvTop + 3, layout.tvRight, layout.tvTop + 5);
+  textC("DIMENSIONS", layout.tvCL, layout.tvTop + 5.5, 2.2, `${fmt(layout.tvW)} W`);
+
+  dashDot("CENTERLINE", layout.tvCL, layout.tvTop + 2, wallH);
+  line("CENTERLINE", 0, wallH + 5, layout.tvCL, wallH + 5);
+  line("CENTERLINE", 0, wallH + 4, 0, wallH + 6);
+  line("CENTERLINE", layout.tvCL, wallH + 4, layout.tvCL, wallH + 6);
+  textC("CENTERLINE", layout.tvCL / 2, wallH + 6.5, 2.2, `${fmt(layout.tvCL)} TO TV CL`);
+
+  line("DIMENSIONS", 0, -8, wallW, -8);
+  line("DIMENSIONS", 0, -9, 0, -7);
+  line("DIMENSIONS", wallW, -9, wallW, -7);
+  textC("DIMENSIONS", wallW / 2, -12.5, 2.5, `${fmt(wallW)} WALL`);
+
+  line("DIMENSIONS", wallW + 6, 0, wallW + 6, wallH);
+  line("DIMENSIONS", wallW + 5, 0, wallW + 7, 0);
+  line("DIMENSIONS", wallW + 5, wallH, wallW + 7, wallH);
+  text("DIMENSIONS", wallW + 8, wallH / 2, 2.5, `${fmt(wallH)} H`);
+
+  // ---- notes column (true data, right of the wall) ----
+  const nx = wallW + 24;
+  let ny = wallH - 2;
+  const note = (s, h = 1.8) => { text("NOTES", nx, ny, h, s); ny -= h + 2.2; };
+  note(`${S.brand.toUpperCase()} ${S.selectedSize}" - FRONT ELEVATION`, 2.2);
+  note(`TV: ${fmt(layout.tvW)} W x ${fmt(layout.tvH)} H`);
+  note(`CENTER ${fmt(layout.centerH)} AFF / BOTTOM ${fmt(layout.tvBottom)} AFF`);
+  note(`TV CL: ${fmt(layout.tvCL)} FROM LEFT WALL EDGE`);
+  if (layout.vesa) note(`VESA ${layout.vesa.spec.w_mm}x${layout.vesa.spec.h_mm} MM - ${layout.vesa.spec.screw} SCREWS`);
+  if (layout.box) note(`BOX: ${layout.box.brand} ${layout.box.label} (${layout.box.w}x${layout.box.h}x${layout.box.d} IN)`);
+  if (S.showOutlet) note(`PWR: ${fmt(layout.outlet.aff)} AFF, ${fmt(Math.abs(layout.outlet.x - layout.tvCL))} ${layout.outlet.x < layout.tvCL ? "LT" : "RT"} OF CL`);
+  if (S.showLowVolt) note(`LV: ${fmt(layout.lv.aff)} AFF, ${fmt(Math.abs(layout.lv.x - layout.tvCL))} ${layout.lv.x < layout.tvCL ? "LT" : "RT"} OF CL`);
+  note(`MOUNT: ${S.mountType === "flat" ? "FLAT" : "ARTICULATING"}`);
+
+  // ---- title block ----
+  const title = [S.projectName, S.clientName].filter(Boolean).join(" - ");
+  if (title) text("NOTES", 0, -18, 2, title.toUpperCase());
+  text("NOTES", 0, -22, 1.5, `REV ${S.revision || "01"} - UNITS: INCHES - NOT TO SCALE, DIMENSIONS GOVERN`);
+
+  P(0, "ENDSEC");
+  P(0, "EOF");
+  return out.join("\r\n");
+};
+
+const normKey = (k) => String(k).toLowerCase().replace(/[\s_-]/g, "");
+
+// Pull TV-relevant fields out of ANY JSON — our own exports, the job-walk
+// app, whatever — and ignore everything else. Deep-walks nested objects and
+// arrays. Returns { fields, matched, ignored, notes, native }.
+const extractImportedDesign = (data) => {
+  const out = { fields: {}, matched: [], ignored: 0, notes: [], native: false };
+  if (!data || typeof data !== "object") { out.notes.push("Not a JSON object"); return out; }
+
+  if (data.app === "tv-wall-planner" && data.design && typeof data.design === "object") {
+    out.fields = { ...data.design };
+    out.matched.push("native tv-wall-planner design");
+    out.native = true;
+    return out;
+  }
+
+  const set = (key, val, label) => {
+    if (out.fields[key] === undefined) {
+      out.fields[key] = val;
+      if (label) out.matched.push(label);
+    }
+  };
+  const brandFrom = (s) => BRANDS.find(b => new RegExp(`\\b${b}\\b`, "i").test(String(s)));
+
+  const visit = (node, key, parentK) => {
+    const k = normKey(key || "");
+    if (node === null || node === undefined) { out.ignored++; return; }
+    if (Array.isArray(node)) { node.forEach(v => visit(v, key, parentK)); return; }
+    if (typeof node === "object") {
+      if (k.includes("fireplace")) set("hasFireplace", true, "fireplace section");
+      if (k.includes("mantel")) { set("hasMantel", true, "mantel section"); set("hasFireplace", true); }
+      Object.entries(node).forEach(([ck, cv]) => visit(cv, ck, k));
+      return;
+    }
+    const pk = parentK || "";
+    const num = typeof node === "number" ? node
+      : (typeof node === "string" && /^-?\d+(\.\d+)?$/.test(node.trim()) ? parseFloat(node) : null);
+    const str = typeof node === "string" ? node : null;
+    const isTVCtx = pk.includes("tv") || pk.includes("display") || pk.includes("television") || pk.includes("screen");
+
+    if ((/^(tvsize|screensize|tvdiagonal|diagonal|panelsize)$/.test(k) || (isTVCtx && /^(size|diag(onal)?|inches)$/.test(k))) && num != null && num >= 18 && num <= 130) {
+      set("selectedSize", num, `TV size ${num}"`);
+    } else if (/(brand|make|manufacturer)/.test(k) && str && brandFrom(str)) {
+      set("brand", brandFrom(str), `brand ${brandFrom(str)}`);
+    } else if (isTVCtx && /^(model|name|label|description)$/.test(k) && str) {
+      const b = brandFrom(str);
+      if (b) set("brand", b, `brand ${b} (from "${str.slice(0, 30)}")`);
+      const m = str.match(/(\d{2,3})\s*("|in\b|inch|”)/i) || str.match(/\b(\d{2,3})\b/);
+      if (m && +m[1] >= 18 && +m[1] <= 130) set("selectedSize", +m[1], `TV size ${m[1]}" (from "${str.slice(0, 30)}")`);
+    } else if ((/^(wallwidth|wallw)$/.test(k) || (pk.includes("wall") && /^(width|w)$/.test(k))) && num != null && num >= 24 && num <= 600) {
+      set("wallW", num, `wall width ${num}"`);
+    } else if ((/^(wallheight|wallh)$/.test(k) || (pk.includes("wall") && /^(height|h)$/.test(k))) && num != null && num >= 24 && num <= 300) {
+      set("wallH", num, `wall height ${num}"`);
+    } else if (/^(hasfireplace|fireplace)$/.test(k) && typeof node === "boolean") {
+      if (node) set("hasFireplace", true, "fireplace: yes"); else out.ignored++;
+    } else if (pk.includes("fireplace") && /^(openingwidth|width|w)$/.test(k) && num != null && num > 10 && num < 200) {
+      set("fbOpeningW", num, `firebox W ${num}"`);
+    } else if (pk.includes("fireplace") && /^(openingheight|height|h)$/.test(k) && num != null && num > 10 && num < 100) {
+      set("fbOpeningH", num, `firebox H ${num}"`);
+    } else if (pk.includes("fireplace") && /offset/.test(k) && num != null && Math.abs(num) < 200) {
+      set("fbOffsetX", String(num), `fireplace offset ${num}"`);
+    } else if (((pk.includes("mantel") && /^(height|top|topheight)$/.test(k)) || /^(mantelheight|manteltop)/.test(k)) && num != null && num > 20 && num < 90) {
+      set("mantelH", num, `mantel top ${num}"`); set("hasMantel", true); set("hasFireplace", true);
+    } else if (/(mounttype|^mount$)/.test(k) && str) {
+      if (/artic|motion|swivel/i.test(str)) set("mountType", "articulating", "mount: articulating");
+      else if (/flat|fixed|low.?profile/i.test(str)) set("mountType", "flat", "mount: flat");
+      else out.ignored++;
+    } else if (/(viewingdistance|viewdist|seatingdistance|distancetoseating)/.test(k) && num != null && num >= 36 && num <= 480) {
+      set("viewDist", num, `viewing distance ${num}"`);
+    } else if ((/^(project|projectname|jobname|jobsite|address|site)$/.test(k) && str) || ((pk.includes("project") || pk.includes("job")) && /^name$/.test(k) && str)) {
+      set("projectName", str.slice(0, 80), `project "${str.slice(0, 40)}"`);
+    } else if ((/^(client|clientname|customer|customername|owner)$/.test(k) && str) || ((pk.includes("client") || pk.includes("customer")) && /^name$/.test(k) && str)) {
+      set("clientName", str.slice(0, 80), `client "${str.slice(0, 40)}"`);
+    } else if (/(mountheight|mountingheight|centerheight)/.test(k) && num != null && num >= 20 && num <= 120) {
+      set("mountHeightOverride", String(num), `mount height ${num}" (to center)`); set("heightRef", "center");
+    } else {
+      out.ignored++;
+    }
+  };
+  visit(data, "", "");
+  return out;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 3 — SELF-TESTS
+// Golden cases (hand-computed) + invariants swept over the full catalog.
+// Runs on load; results feed the diagnostics panel. If this is red, do not
+// trust the drawing.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const approx = (a, b, eps = 0.02) => Math.abs(a - b) <= eps;
+
+const runSelfTests = () => {
+  const results = [];
+  const T = (group, name, pass, detail = "") => results.push({ group, name, pass: !!pass, detail });
+
+  // ---- Golden case A: Sony 65" flat, 120×108 wall, no fireplace ----
+  {
+    const inp = { selectedSize: 65, brand: "Sony", centerH: 42, tvCL: 60, showBackBox: true, effectiveBoxModel: "SB-RBX-PRO-14", mountType: "flat" };
+    const L = computeLayout(inp);
+    T("golden", "A: TV 57.9 × 33.1", approx(L.tvW, 57.88) && approx(L.tvH, 33.05), `w=${L.tvW.toFixed(2)} h=${L.tvH.toFixed(2)}`);
+    T("golden", "A: VESA center 41.01\" AFF (−3% bias)", approx(L.vesa.aff, 41.0085), `aff=${L.vesa.aff.toFixed(3)}`);
+    T("golden", "A: box center 75.91\" from left", approx(L.box.cx, 75.9055), `cx=${L.box.cx.toFixed(3)}`);
+    T("golden", "A: PWR 36.51\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 36.5085) && approx(L.outlet.x - L.tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)} dx=${(L.outlet.x - L.tvCL).toFixed(3)}`);
+    T("golden", "A: LV 19.41\" right of CL", approx(L.lv.x - L.tvCL, 19.4055), `dx=${(L.lv.x - L.tvCL).toFixed(3)}`);
+    T("golden", "A: box within TV, not flagged", !L.box.extendsOff && !L.box.underRated);
+  }
+  // ---- Golden case B: "Smith Residence" — fireplace +15", mantel 54", bottom override 53.5 ----
+  {
+    const recommended = computeRecommendedCenterH({ selectedSize: 65, hasFireplace: true, hasMantel: true, mantelH: 54, fbOpeningH: 30, useViewDist: true, viewDist: 144 });
+    T("golden", "B: recommended center 78.53\" (mantel 54 + 8 + h/2)", approx(recommended, 78.525), `rec=${recommended.toFixed(3)}`);
+    const centerH = computeCenterH({ mountHeightOverride: "53.5", heightRef: "bottom", recommendedCenterH: recommended, selectedSize: 65 });
+    T("golden", "B: override 53.5 bottom → center 70.03", approx(centerH, 70.025), `center=${centerH.toFixed(3)}`);
+    const tvCL = computeTvCL({ wallW: 120, hasFireplace: true, fbOffsetIn: 15, tvOffsetIn: 0 });
+    T("golden", "B: TV CL 75.0\" (follows fireplace)", approx(tvCL, 75));
+    const L = computeLayout({ selectedSize: 65, brand: "Sony", centerH, tvCL, showBackBox: true, effectiveBoxModel: "SB-RBX-PRO-14", mountType: "flat" });
+    T("golden", "B: PWR 64.53\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 64.5335) && approx(L.outlet.x - tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)}`);
+  }
+  // ---- Golden case C: LG 55" (−10% VESA bias, shallow box) ----
+  {
+    const L = computeLayout({ selectedSize: 55, brand: "LG", centerH: 42, tvCL: 60, showBackBox: true, effectiveBoxModel: "SB-RBX-PRO-8", mountType: "flat" });
+    T("golden", "C: LG 55 VESA center 39.19\" AFF (−10%)", approx(L.vesa.aff, 39.185), `aff=${L.vesa.aff.toFixed(3)}`);
+    T("golden", "C: outlet 37.69\" AFF in 8\"-tall box", approx(L.outlet.aff, 37.685), `aff=${L.outlet.aff.toFixed(3)}`);
+  }
+  // ---- Golden: back-box selector branches ----
+  T("golden", "Samsung 85 flat → Pro XL (One Connect)", recommendBackBox(85, "flat", "Samsung") === "SB-RBX-PRO-XL");
+  T("golden", "Sony 98 flat → Pro XL (>85 rule)", recommendBackBox(98, "flat", "Sony") === "SB-RBX-PRO-XL");
+  T("golden", "Sony 100 articulating → WB80, flagged under-rated", (() => {
+    const L = computeLayout({ selectedSize: 100, brand: "Sony", centerH: 50, tvCL: 60, showBackBox: true, effectiveBoxModel: recommendBackBox(100, "articulating", "Sony"), mountType: "articulating" });
+    return L.box.model === "FA-WB80" && L.box.underRated;
+  })());
+  // ---- Golden: recommendations (120×108 wall, Sony, 144" viewing) ----
+  {
+    const rec = computeRecommendations({ brand: "Sony", wallW: 120, wallH: 108, hasFireplace: false, hasMantel: true, mantelH: 54, fbOpeningH: 30, useViewDist: true, viewDist: 144 });
+    T("golden", "Recommendations = [85, 77, 75, 65]", JSON.stringify(rec) === JSON.stringify([85, 77, 75, 65]), JSON.stringify(rec));
+  }
+  // ---- Golden: formatting ----
+  T("format", `64.5 → 64-1/2"`, fmtIn(64.5, "frac") === `64-1/2"`, fmtIn(64.5, "frac"));
+  T("format", `75 → 6'-3"`, fmtIn(75, "ftin") === `6'-3"`, fmtIn(75, "ftin"));
+  T("format", `75.25 → 6'-3 1/4"`, fmtIn(75.25, "ftin") === `6'-3 1/4"`, fmtIn(75.25, "ftin"));
+  T("format", `60 → 5'-0"`, fmtIn(60, "ftin") === `5'-0"`, fmtIn(60, "ftin"));
+  T("format", `36.51 → 36.5" (dec)`, fmtIn(36.5085, "dec") === `36.5"`, fmtIn(36.5085, "dec"));
+  T("format", `0.375 → 3/8"`, fmtIn(0.375, "frac") === `3/8"`, fmtIn(0.375, "frac"));
+  T("format", `-2.5 → -2-1/2"`, fmtIn(-2.5, "frac") === `-2-1/2"`, fmtIn(-2.5, "frac"));
+
+  // ---- JSON interop: the extractor pulls TV fields from foreign files ----
+  T("interop", "Job-walk style JSON → brand/size/wall/project/fireplace", (() => {
+    const ex = extractImportedDesign({
+      job: { name: "Beach House" },
+      rooms: [{
+        name: "Living",
+        tv: { brand: "Sony Bravia", size: 65 },
+        wall: { width: 120, height: 108 },
+        fireplace: { openingWidth: 40, openingHeight: 30, mantelHeight: 54 },
+      }],
+    });
+    const f = ex.fields;
+    return f.brand === "Sony" && f.selectedSize === 65 && f.wallW === 120 && f.wallH === 108 &&
+           f.projectName === "Beach House" && f.hasFireplace === true && f.mantelH === 54 &&
+           f.fbOpeningW === 40 && f.fbOpeningH === 30;
+  })());
+  T("interop", `TV model string "Samsung QN90 75 inch" parses`, (() => {
+    const ex = extractImportedDesign({ tv: { model: "Samsung QN90 75 inch" } });
+    return ex.fields.brand === "Samsung" && ex.fields.selectedSize === 75;
+  })());
+  T("interop", "Native export round-trips", (() => {
+    const ex = extractImportedDesign(buildExportJSON({ wallW: 96, brand: "LG", selectedSize: 77 }, null));
+    return ex.native === true && ex.fields.wallW === 96 && ex.fields.brand === "LG" && ex.fields.selectedSize === 77;
+  })());
+  T("interop", "Irrelevant JSON tolerated, nothing matched", (() => {
+    const ex = extractImportedDesign({ a: [1, 2, { b: "x" }], c: null, speakers: { count: 4 } });
+    return ex.matched.length === 0 && ex.ignored > 0;
+  })());
+
+  // ---- DXF export ----
+  {
+    const dxfLayout = computeLayout({ selectedSize: 65, brand: "Sony", centerH: 42, tvCL: 60, showBackBox: true, effectiveBoxModel: "SB-RBX-PRO-14", mountType: "flat" });
+    const dxfState = { wallW: 120, wallH: 108, hasFireplace: false, fbOpeningW: 40, fbOpeningH: 30, fbOffsetIn: 0, hasMantel: false, mantelH: 54, mantelDepth: 8, brand: "Sony", selectedSize: 65, dispUnits: "dec", mountType: "flat", showVesa: true, showOutlet: true, showLowVolt: true, heightRef: "center", projectName: "DXF Test", clientName: "", revision: "01" };
+    const dxf = buildDXF(dxfState, dxfLayout);
+    T("interop", "DXF: valid R12 skeleton (header/tables/entities/EOF)",
+      dxf.startsWith("0\r\nSECTION") && dxf.includes("AC1009") && dxf.includes("ENTITIES") && dxf.endsWith("EOF") && dxf.includes("BACKBOX") && dxf.includes("ELECTRICAL"));
+    T("interop", "DXF: geometry at true scale (wall 120, TV right edge 88.94)",
+      dxf.includes("120.0000") && dxf.includes(dxfLayout.tvRight.toFixed(4)) && dxf.includes(dxfLayout.outlet.aff.toFixed(4)));
+    T("interop", "DXF: ASCII-safe text (no unicode survives)",
+      !/[^\x00-\x7F]/.test(dxf));
+  }
+
+  // ---- Invariants: swept across every brand / size / mount / fireplace config ----
+  const configs = [
+    { name: "open wall", hasFireplace: false, hasMantel: false, mantelH: 54, fbOpeningH: 30 },
+    { name: "fireplace+mantel", hasFireplace: true, hasMantel: true, mantelH: 54, fbOpeningH: 30 },
+    { name: "fireplace no mantel", hasFireplace: true, hasMantel: false, mantelH: 54, fbOpeningH: 30 },
+  ];
+  let geomOK = true, vesaOK = true, boxKeyOK = true, boxHonest = true, elecOK = true, convOK = true, recFitsOK = true;
+  let sweepCount = 0;
+  const detail = [];
+  BRANDS.forEach(brand => {
+    TV_CATALOG[brand].forEach(sz => {
+      ["flat", "articulating"].forEach(mountType => {
+        const boxModel = recommendBackBox(sz, mountType, brand);
+        if (!BACK_BOXES[boxModel]) { boxKeyOK = false; detail.push(`no box: ${brand} ${sz} ${mountType}`); }
+        const L = computeLayout({ selectedSize: sz, brand, centerH: 50, tvCL: 60, showBackBox: true, effectiveBoxModel: boxModel, mountType });
+        sweepCount++;
+        // geometry symmetry + height identities
+        if (!approx(L.tvTop - L.tvBottom, L.tvH, 1e-9) || !approx((L.tvLeft + L.tvRight) / 2, L.tvCL, 1e-9)) { geomOK = false; detail.push(`geom: ${brand} ${sz}`); }
+        // VESA mm→inch exact + bias direction
+        if (L.vesa) {
+          const spec = VESA_DATA[brand][sz];
+          if (!approx(L.vesa.w, spec.w_mm / 25.4, 1e-9) || !approx(L.vesa.aff, 50 + (spec.voffset_pct / 100) * L.tvH, 1e-9)) { vesaOK = false; detail.push(`vesa: ${brand} ${sz}`); }
+        }
+        // box honesty: flag must match independently recomputed geometry
+        if (L.box) {
+          const out = L.box.cx - L.box.w / 2 < L.tvLeft || L.box.cx + L.box.w / 2 > L.tvRight ||
+                      L.box.aff + L.box.h / 2 > L.tvTop || L.box.aff - L.box.h / 2 < L.tvBottom;
+          if (out !== L.box.extendsOff) { boxHonest = false; detail.push(`box flag: ${brand} ${sz} ${mountType}`); }
+          // electrical inside box
+          const inBox = (p) => p.x >= L.box.cx - L.box.w / 2 - 1e-9 && p.x <= L.box.cx + L.box.w / 2 + 1e-9 &&
+                               p.aff >= L.box.aff - L.box.h / 2 - 1e-9 && p.aff <= L.box.aff + L.box.h / 2 + 1e-9;
+          if (!inBox(L.outlet) || !inBox(L.lv)) { elecOK = false; detail.push(`elec: ${brand} ${sz} ${mountType}`); }
+        }
+        // override conversion round-trip
+        const there = convertOverride(50, "bottom", sz);
+        const back = convertOverride(there, "center", sz);
+        if (!approx(back, 50, 1e-9)) { convOK = false; detail.push(`conv: ${sz}`); }
+      });
+      // recommendation ⇒ placed at recommended height, TV fits the wall
+      configs.forEach(cfg => {
+        const rec = computeRecommendations({ brand, wallW: 120, wallH: 108, useViewDist: false, viewDist: 144, ...cfg });
+        rec.forEach(rsz => {
+          const rc = computeRecommendedCenterH({ selectedSize: rsz, useViewDist: false, viewDist: 144, ...cfg });
+          const top = rc + tvDims(rsz).h / 2;
+          if (top > 108 + 1e-9) { recFitsOK = false; detail.push(`rec-fit: ${brand} ${rsz} ${cfg.name} top=${top.toFixed(1)}`); }
+        });
+      });
+    });
+  });
+  T("invariant", `Geometry identities (${sweepCount} layouts)`, geomOK, detail.filter(d => d.startsWith("geom")).join("; "));
+  T("invariant", "VESA mm→inch exact, bias applied correctly", vesaOK, detail.filter(d => d.startsWith("vesa")).join("; "));
+  T("invariant", "Box selector always returns a real model", boxKeyOK, detail.filter(d => d.startsWith("no box")).join("; "));
+  T("invariant", "extendsOff flag never lies", boxHonest, detail.filter(d => d.startsWith("box flag")).join("; "));
+  T("invariant", "Outlet & LV always inside the back box", elecOK, detail.filter(d => d.startsWith("elec")).join("; "));
+  T("invariant", "Center↔bottom conversion round-trips", convOK, detail.filter(d => d.startsWith("conv")).join("; "));
+  T("invariant", "Every recommended size fits its wall at recommended height", recFitsOK, detail.filter(d => d.startsWith("rec-fit")).join("; "));
+
+  // fireplace bounds issue detection (new engine capability)
+  T("invariant", "Off-wall firebox is detected", (() => {
+    const iss = computePlacementIssues({ layout: null, wallW: 120, wallH: 108, hasFireplace: true, fbOpeningW: 40, fbOffsetIn: 45 });
+    return iss.some(s => s.includes("Firebox"));
+  })());
+
+  // persistence round-trip (pure shape check)
+  T("invariant", "Saved state survives JSON round-trip", (() => {
+    const state = { wallW: 120, selectedSize: 65, tvOffsetX: "-3.5", heightRef: "bottom" };
+    const back = JSON.parse(JSON.stringify(state));
+    return back.wallW === 120 && back.selectedSize === 65 && back.tvOffsetX === "-3.5" && back.heightRef === "bottom";
+  })());
+
+  const passed = results.filter(r => r.pass).length;
+  return { results, passed, total: results.length };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 4 — THEME ("Blueprint Modern")
+// Screen: white linework on Prussian navy (a true blueprint).
+// Print:  navy linework on white (a "blueline" — toner-friendly exports).
+// Schematic colors are literal hex (CSS vars don't survive SVG export).
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SCREEN_PALETTE = {
+  id: "scr",
+  canvas: "#0D1B2A", grid: "rgba(232,238,245,0.05)",
+  wallFill: "#13263B", wallStroke: "#E8EEF5",
+  line: "#E8EEF5", lineSoft: "#8DA3B8",
+  tvFill: "#060B12", tvStroke: "#E8EEF5", screenFill: "#0B1622", tvLabel: "#8DA3B8",
+  mantel: "#27425F", fbFill: "#1A3049", fbOpen: "#060B12",
+  dimText: "#E8EEF5", dimSub: "#8DA3B8", halo: "#0D1B2A",
+  cl: "#FF7A6B", vesa: "#FFD166", box: "#3ECFE0", boxBad: "#FF5C4D", pwr: "#4ADE80", lv: "#FFA94D",
+  mount: "#8DA3B8",
+  pillStyle: "filled", pillText: "#06121F",
+  title: "#8DA3B8",
+};
+
+const PRINT_PALETTE = {
+  id: "prt",
+  canvas: "#FFFFFF", grid: "rgba(16,42,67,0.07)",
+  wallFill: "#F4F7FA", wallStroke: "#102A43",
+  line: "#102A43", lineSoft: "#5C7186",
+  tvFill: "#102A43", tvStroke: "#102A43", screenFill: "#1D3A57", tvLabel: "#B8C9DA",
+  mantel: "#D7E0E9", fbFill: "#E8EEF4", fbOpen: "#102A43",
+  dimText: "#102A43", dimSub: "#5C7186", halo: "#FFFFFF",
+  cl: "#C0392B", vesa: "#8A6A1A", box: "#0E7C90", boxBad: "#C0392B", pwr: "#1E7D3C", lv: "#B25E0F",
+  mount: "#5C7186",
+  pillStyle: "outline", pillText: null, // outline pills use the accent color for text
+  title: "#5C7186",
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 5 — SCHEMATIC BUILDER + ANNOTATION ENGINE
+// Collision-free by construction:
+//  • right-side callouts pack into a leader rail (no overlap possible)
+//  • dimensions take "lanes" that step outward when crowded
+//  • SVG padding is DERIVED from what's actually drawn — no magic numbers
+// ═══════════════════════════════════════════════════════════════════════════
+
+// IBM Plex Mono advance ≈ 0.6em
+const textW = (str, fontSize) => str.length * fontSize * 0.62;
+
+// Pack rail entries top-down using each entry's REAL height (pills can have
+// 2 or 3 lines). Deterministic: sorted by anchor Y, ties broken by
+// registration order. ≥8px gap between pill boxes — overlap impossible.
+const packRail = (entries, minY) => {
+  const sorted = entries.map((e, i) => ({ ...e, _i: i }))
+    .sort((a, b) => (a.anchorY - b.anchorY) || (a._i - b._i));
+  let prevTop = -Infinity, prevH = 0;
+  sorted.forEach(e => {
+    const h = 16 + (e.lines.length - 1) * 13; // pill bg + extra text lines
+    const top = Math.max(e.anchorY - 16, prevTop + prevH + 8, minY - 12);
+    e.slotY = top + 12;
+    prevTop = top;
+    prevH = h;
+  });
+  return sorted;
+};
+
+const buildSchematic = (S, P) => {
+  const {
+    wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
+    mantelH, mantelDepth, brand, selectedSize, layout, heightRef,
+    showVesa, showOutlet, showLowVolt, projectName, clientName, revision,
+    dispUnits, isMobile, isTablet, viewportW,
+  } = S;
+  const fmt = (v) => fmtIn(v, dispUnits);
+
+  const safeWallW = Math.max(wallW || 1, 1);
+  const safeWallH = Math.max(wallH || 1, 1);
+  const basePad = isMobile ? 48 : 64;
+  const maxW = isMobile ? Math.max(viewportW - 60, 280) : (isTablet ? Math.max(viewportW - 360, 460) : 760);
+  const maxH = isMobile ? 360 : (isTablet ? 480 : 540);
+  const scale = Math.min(maxW / safeWallW, maxH / safeWallH);
+
+  // --- derive pads from content (all predicates are pad-independent) ---
+  // Left: the mount-height dimension is two lines — the value (13px) and the
+  // reference sub-label (8px + 1px letterspacing). Pad covers the wider one.
+  const refValue = layout ? (heightRef === "bottom" ? layout.tvBottom : layout.centerH) : 0;
+  const leftDimText = layout ? fmt(refValue) : "";
+  const leftDimSub = heightRef === "bottom" ? "TO BOTTOM" : "TO CENTER";
+  const leftDimW = Math.max(textW(leftDimText, 13), leftDimSub.length * (8 * 0.62 + 1));
+  const leftPad = layout ? Math.max(basePad, 44 + leftDimW + 16) : basePad;
+
+  // Top: TV-width dim sits 18px above the TV; the CL dim needs its own lane
+  // above the wall — and steps up if the TV mounts near the wall top.
+  let clDimRelY = -16; // relative to wallY
+  if (layout) {
+    const tvTopRel = (safeWallH - layout.tvTop) * scale; // px from wall top down to TV top
+    const widthDimRelY = tvTopRel - 18;
+    if (widthDimRelY < clDimRelY + 24) clDimRelY = widthDimRelY - 24;
+  }
+  const topPad = Math.max(basePad, -clDimRelY + 30);
+
+  // Right: leader rail (when callouts shown) + wall-height dim, both lane-aware.
+  const railW = 148;
+  const hasRail = layout && (showVesa || layout.box || showOutlet || showLowVolt);
+  let hDimRelX = safeWallW * scale + 32; // relative to wallX
+  if (hasRail) {
+    const tvRightRel = layout.tvRight * scale;
+    const railRightRel = tvRightRel + 16 + railW;
+    if (hDimRelX < railRightRel + 12) hDimRelX = railRightRel + 12;
+  }
+  const rightPad = (hDimRelX - safeWallW * scale) + 24 + textW(`${safeWallH}" H`, 13) + 12;
+
+  const hasTitleBlock = !!(projectName || clientName);
+  const bottomPad = basePad + 26 + (hasTitleBlock ? 16 : 0);
+
+  const wallX = leftPad;
+  const wallY = topPad;
+  const wallPxW = safeWallW * scale;
+  const wallPxH = safeWallH * scale;
+  const floorY = wallY + wallPxH;
+  const svgW = wallPxW + leftPad + rightPad;
+  const svgH = wallPxH + topPad + bottomPad;
+
+  const elements = [];
+  const K = (k) => `${P.id}-${k}`; // unique keys/ids per palette render
+
+  // wall + floor
+  elements.push(<rect key={K("wall")} x={wallX} y={wallY} width={wallPxW} height={wallPxH} fill={P.wallFill} stroke={P.wallStroke} strokeWidth="1.5"/>);
+  elements.push(<line key={K("floor")} x1={wallX - 20} y1={floorY} x2={wallX + wallPxW + 20} y2={floorY} stroke={P.line} strokeWidth="2"/>);
+  for (let i = 0; i < 12; i++) {
+    const x = wallX - 18 + i * ((wallPxW + 36) / 12);
+    elements.push(<line key={K(`hatch-${i}`)} x1={x} y1={floorY} x2={x + 6} y2={floorY + 8} stroke={P.lineSoft} strokeWidth="0.8"/>);
+  }
+
+  if (hasFireplace) {
+    const fbW = fbOpeningW * scale;
+    const fbH = fbOpeningH * scale;
+    const fbX = wallX + (wallPxW - fbW) / 2 + fbOffsetIn * scale;
+    const fbY = floorY - fbH;
+    elements.push(<rect key={K("fb")} x={fbX} y={fbY} width={fbW} height={fbH} fill={P.fbFill} stroke={P.wallStroke} strokeWidth="1"/>);
+    const inset = 6;
+    elements.push(<rect key={K("fbop")} x={fbX + inset} y={fbY + inset} width={fbW - inset * 2} height={fbH - inset * 2} fill={P.fbOpen} stroke={P.lineSoft} strokeWidth="0.8"/>);
+    if (hasMantel) {
+      const mH = mantelDepth * scale;
+      const mY = floorY - mantelH * scale;
+      const overhang = 12 * scale;
+      elements.push(<rect key={K("mantel")} x={fbX - overhang} y={mY} width={fbW + overhang * 2} height={mH} fill={P.mantel} stroke={P.wallStroke} strokeWidth="1"/>);
+    }
+  }
+
+  // pill helper — filled (screen) or outlined (print)
+  const pushPill = (key, x, y, lines, color) => {
+    const w = Math.max(...lines.map(l => textW(l.text, l.size))) + 14;
+    const filled = P.pillStyle === "filled";
+    elements.push(<rect key={K(`${key}-bg`)} x={x} y={y - 12} width={w} height={16} rx="2"
+      fill={filled ? color : P.canvas} stroke={filled ? P.canvas : color} strokeWidth={filled ? 0.8 : 1.1}/>);
+    lines.forEach((l, i) => {
+      const fill = i === 0 ? (filled ? P.pillText : color) : color;
+      elements.push(<text key={K(`${key}-t${i}`)} x={x + 6} y={y - 1 + i * 13} textAnchor="start"
+        fill={fill} fontSize={l.size} fontFamily="'IBM Plex Mono', monospace"
+        fontWeight={i === 0 ? 700 : 500} letterSpacing="0.3">{l.text}</text>);
+    });
+    return w;
+  };
+
+  if (layout) {
+    const { tvW, tvH } = layout;
+    const tvPxW = tvW * scale;
+    const tvPxH = tvH * scale;
+    const tvX = wallX + layout.tvLeft * scale;
+    const tvCenterY = floorY - layout.centerH * scale;
+    const tvY = tvCenterY - tvPxH / 2;
+    const clPx = wallX + layout.tvCL * scale;
+
+    // TV
+    elements.push(<rect key={K("tv")} x={tvX} y={tvY} width={tvPxW} height={tvPxH} fill={P.tvFill} stroke={P.tvStroke} strokeWidth="1.5"/>);
+    elements.push(<rect key={K("tvscreen")} x={tvX + 3} y={tvY + 3} width={tvPxW - 6} height={tvPxH - 6} fill={P.screenFill} stroke="none"/>);
+    if (tvPxW > 120) {
+      elements.push(<text key={K("tvlabel")} x={tvX + 8} y={tvY + 16} textAnchor="start" fill={P.tvLabel} fontSize="10" fontFamily="'Space Grotesk', sans-serif" letterSpacing="1" fontWeight="500">{brand.toUpperCase()} {selectedSize}"</text>);
+    }
+
+    // VESA + mount plate
+    const vesaCenterX = clPx;
+    let vesaCenterY = tvCenterY, vesaPxW = 0, vesaPxH = 0;
+    if (layout.vesa) {
+      vesaPxW = layout.vesa.w * scale;
+      vesaPxH = layout.vesa.h * scale;
+      vesaCenterY = floorY - layout.vesa.aff * scale;
+      const mountPxW = vesaPxW + (S.mountType === "flat" ? 2 : 3) * scale;
+      const mountPxH = S.mountType === "flat" ? 3.5 * scale : vesaPxH + 2 * scale;
+      elements.push(<rect key={K("mount")} x={vesaCenterX - mountPxW / 2} y={vesaCenterY - mountPxH / 2} width={mountPxW} height={mountPxH} fill="none" stroke={P.mount} strokeWidth="1.2" strokeDasharray="2 3" opacity="0.7"/>);
+    }
+
+    // back box
+    let bbX = 0, bbY = 0, bbPxW = 0, bbPxH = 0;
+    if (layout.box) {
+      bbPxW = layout.box.w * scale;
+      bbPxH = layout.box.h * scale;
+      bbX = wallX + (layout.box.cx - layout.box.w / 2) * scale;
+      bbY = floorY - (layout.box.aff + layout.box.h / 2) * scale;
+      const c = layout.box.extendsOff ? P.boxBad : P.box;
+      elements.push(<rect key={K("bb")} x={bbX} y={bbY} width={bbPxW} height={bbPxH} fill={c} fillOpacity="0.14" stroke={c} strokeWidth="1.8" strokeDasharray="8 4"/>);
+    }
+
+    if (showVesa && layout.vesa) {
+      const vLeft = vesaCenterX - vesaPxW / 2;
+      const vTop = vesaCenterY - vesaPxH / 2;
+      elements.push(<rect key={K("vesa-rect")} x={vLeft} y={vTop} width={vesaPxW} height={vesaPxH} fill="none" stroke={P.vesa} strokeWidth="1.5" strokeDasharray="3 2"/>);
+      [[vLeft, vTop], [vLeft + vesaPxW, vTop], [vLeft, vTop + vesaPxH], [vLeft + vesaPxW, vTop + vesaPxH]].forEach(([hx, hy], i) => {
+        elements.push(<circle key={K(`hole-${i}`)} cx={hx} cy={hy} r={3.5} fill={P.vesa} stroke={P.tvFill} strokeWidth="1.5"/>);
+        elements.push(<circle key={K(`holei-${i}`)} cx={hx} cy={hy} r={1.7} fill={P.tvFill}/>);
+      });
+      if (layout.vesa.spec.voffset_pct !== 0) {
+        elements.push(<line key={K("vesa-bias")} x1={tvX + 4} y1={tvY + tvPxH / 2} x2={tvX + tvPxW - 4} y2={tvY + tvPxH / 2} stroke={P.vesa} strokeWidth="0.6" strokeDasharray="1 4" opacity="0.5"/>);
+      }
+    }
+
+    // ----- leader rail: every right-side callout registers, then packs -----
+    const sideOf = (x) => {
+      const d = x - layout.tvCL;
+      if (Math.abs(d) < 0.05) return "ON TV CL";
+      return `${fmt(Math.abs(d))} ${d < 0 ? "LT" : "RT"} OF CL`;
+    };
+    const rail = [];
+    if (showVesa && layout.vesa) {
+      rail.push({
+        id: "vesa", color: P.vesa,
+        anchor: [vesaCenterX + vesaPxW / 2, vesaCenterY - vesaPxH / 2],
+        anchorY: vesaCenterY - vesaPxH / 2,
+        lines: [
+          { text: `VESA ${layout.vesa.spec.w_mm}×${layout.vesa.spec.h_mm}`, size: 10 },
+          { text: `${layout.vesa.spec.screw} screw`, size: 9 },
+        ],
+      });
+    }
+    if (layout.box) {
+      const c = layout.box.extendsOff ? P.boxBad : P.box;
+      const lines = [
+        { text: layout.box.label, size: 10 },
+        { text: layout.box.brand, size: 9 },
+      ];
+      if (layout.box.extendsOff) lines.push({ text: "! EXTENDS BEYOND TV", size: 8 });
+      rail.push({ id: "bb", color: c, anchor: [bbX + bbPxW, bbY + bbPxH / 2], anchorY: bbY + bbPxH / 2, lines });
+    }
+    if (showOutlet) {
+      const ox = wallX + layout.outlet.x * scale;
+      const oy = floorY - layout.outlet.aff * scale;
+      elements.push(<rect key={K("outlet")} x={ox - 7} y={oy - 5} width={14} height={10} fill={P.halo} stroke={P.pwr} strokeWidth="1.4"/>);
+      elements.push(<circle key={K("o1")} cx={ox - 2.5} cy={oy} r="1.2" fill={P.pwr}/>);
+      elements.push(<circle key={K("o2")} cx={ox + 2.5} cy={oy} r="1.2" fill={P.pwr}/>);
+      rail.push({
+        id: "pwr", color: P.pwr, anchor: [ox + 7, oy], anchorY: oy,
+        lines: [{ text: `PWR ${fmt(layout.outlet.aff)} AFF`, size: 10 }, { text: sideOf(layout.outlet.x), size: 9 }],
+      });
+    }
+    if (showLowVolt) {
+      const lx = wallX + layout.lv.x * scale;
+      const ly = floorY - layout.lv.aff * scale;
+      elements.push(<rect key={K("lv")} x={lx - 6} y={ly - 5} width={12} height={10} fill={P.halo} stroke={P.lv} strokeWidth="1.4"/>);
+      elements.push(<text key={K("lvt")} x={lx} y={ly + 3} textAnchor="middle" fill={P.lv} fontSize="7" fontFamily="'IBM Plex Mono', monospace" fontWeight="700">LV</text>);
+      rail.push({
+        id: "lv", color: P.lv, anchor: [lx + 6, ly], anchorY: ly,
+        lines: [{ text: `LV ${fmt(layout.lv.aff)} AFF`, size: 10 }, { text: sideOf(layout.lv.x), size: 9 }],
+      });
+    }
+    const railX = tvX + tvPxW + 16;
+    packRail(rail, wallY + 10).forEach(e => {
+      elements.push(<line key={K(`${e.id}-leader`)} x1={e.anchor[0]} y1={e.anchor[1]} x2={railX - 4} y2={e.slotY - 4} stroke={e.color} strokeWidth="0.8" opacity="0.7"/>);
+      pushPill(e.id, railX, e.slotY, e.lines, e.color);
+    });
+
+    // ----- dimensions -----
+    // height (left)
+    const dimX = wallX - 32;
+    const refY = heightRef === "bottom" ? (tvY + tvPxH) : tvCenterY;
+    const refLabel = heightRef === "bottom" ? "TO BOTTOM" : "TO CENTER";
+    elements.push(<line key={K("dh")} x1={dimX} y1={floorY} x2={dimX} y2={refY} stroke={P.line} strokeWidth="1"/>);
+    elements.push(<line key={K("dha")} x1={dimX - 4} y1={floorY} x2={dimX + 4} y2={floorY} stroke={P.line} strokeWidth="1"/>);
+    elements.push(<line key={K("dhb")} x1={dimX - 4} y1={refY} x2={dimX + 4} y2={refY} stroke={P.line} strokeWidth="1"/>);
+    const dhMidY = (floorY + refY) / 2;
+    const dhW = textW(leftDimText, 13) + 8;
+    elements.push(<rect key={K("dhbg")} x={dimX - 8 - dhW} y={dhMidY - 10} width={dhW + 4} height={20} fill={P.halo} stroke="none" rx="2"/>);
+    elements.push(<text key={K("dht")} x={dimX - 8} y={dhMidY + 4} textAnchor="end" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{leftDimText}</text>);
+    elements.push(<text key={K("dhl")} x={dimX - 8} y={dhMidY + 19} textAnchor="end" fill={P.dimSub} fontSize="8" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{refLabel}</text>);
+    elements.push(<line key={K("reft1")} x1={tvX - 12} y1={refY} x2={tvX} y2={refY} stroke={P.cl} strokeWidth="1.5"/>);
+    elements.push(<line key={K("reft2")} x1={tvX + tvPxW} y1={refY} x2={tvX + tvPxW + 12} y2={refY} stroke={P.cl} strokeWidth="1.5"/>);
+
+    // width (top, lane 0)
+    const dimY = tvY - 18;
+    const wTxt = `${fmt(tvW)} W`;
+    elements.push(<line key={K("dw")} x1={tvX} y1={dimY} x2={tvX + tvPxW} y2={dimY} stroke={P.line} strokeWidth="1"/>);
+    elements.push(<line key={K("dwa")} x1={tvX} y1={dimY - 4} x2={tvX} y2={dimY + 4} stroke={P.line} strokeWidth="1"/>);
+    elements.push(<line key={K("dwb")} x1={tvX + tvPxW} y1={dimY - 4} x2={tvX + tvPxW} y2={dimY + 4} stroke={P.line} strokeWidth="1"/>);
+    const dwMidX = tvX + tvPxW / 2;
+    const dwW = textW(wTxt, 13) + 8;
+    elements.push(<rect key={K("dwbg")} x={dwMidX - dwW / 2} y={dimY - 18} width={dwW} height={16} fill={P.halo} stroke="none" rx="2"/>);
+    elements.push(<text key={K("dwt")} x={dwMidX} y={dimY - 6} textAnchor="middle" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wTxt}</text>);
+
+    // centerline (top, lane 1 — steps above the width dim when crowded) +
+    // dash-dot CL through the wall, stopping short of the width dimension lane
+    const clDimY = wallY + clDimRelY;
+    elements.push(<line key={K("cl-line")} x1={clPx} y1={wallY + 2} x2={clPx} y2={Math.max(dimY - 8, wallY + 2)} stroke={P.cl} strokeWidth="0.9" strokeDasharray="9 3 2 3" opacity="0.8"/>);
+    elements.push(<line key={K("cl-dim")} x1={wallX} y1={clDimY} x2={clPx} y2={clDimY} stroke={P.cl} strokeWidth="1"/>);
+    elements.push(<line key={K("cl-da")} x1={wallX} y1={clDimY - 4} x2={wallX} y2={clDimY + 4} stroke={P.cl} strokeWidth="1"/>);
+    elements.push(<line key={K("cl-db")} x1={clPx} y1={clDimY - 4} x2={clPx} y2={clDimY + 4} stroke={P.cl} strokeWidth="1"/>);
+    const clTxt = `${fmt(layout.tvCL)} TO TV CL`;
+    const clMidX = (wallX + clPx) / 2;
+    const clW = textW(clTxt, 10) + 8;
+    elements.push(<rect key={K("cl-bg")} x={clMidX - clW / 2} y={clDimY - 16} width={clW} height={13} fill={P.halo} stroke="none" rx="2"/>);
+    elements.push(<text key={K("cl-t")} x={clMidX} y={clDimY - 6} textAnchor="middle" fill={P.cl} fontSize="10" fontWeight="600" fontFamily="'IBM Plex Mono', monospace" letterSpacing="0.5">{clTxt}</text>);
+  }
+
+  // wall width (bottom)
+  const wdY = floorY + 30;
+  elements.push(<line key={K("ww")} x1={wallX} y1={wdY} x2={wallX + wallPxW} y2={wdY} stroke={P.line} strokeWidth="1"/>);
+  elements.push(<line key={K("wwa")} x1={wallX} y1={wdY - 4} x2={wallX} y2={wdY + 4} stroke={P.line} strokeWidth="1"/>);
+  elements.push(<line key={K("wwb")} x1={wallX + wallPxW} y1={wdY - 4} x2={wallX + wallPxW} y2={wdY + 4} stroke={P.line} strokeWidth="1"/>);
+  elements.push(<text key={K("wwt")} x={wallX + wallPxW / 2} y={wdY + 16} textAnchor="middle" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{fmtIn(safeWallW, dispUnits)} WALL</text>);
+
+  // wall height (right, lane-aware)
+  const whX = wallX + hDimRelX;
+  elements.push(<line key={K("wh")} x1={whX} y1={wallY} x2={whX} y2={floorY} stroke={P.line} strokeWidth="1"/>);
+  elements.push(<line key={K("wha")} x1={whX - 4} y1={wallY} x2={whX + 4} y2={wallY} stroke={P.line} strokeWidth="1"/>);
+  elements.push(<line key={K("whb")} x1={whX - 4} y1={floorY} x2={whX + 4} y2={floorY} stroke={P.line} strokeWidth="1"/>);
+  elements.push(<text key={K("wht")} x={whX + 8} y={(wallY + floorY) / 2 + 4} fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{fmtIn(safeWallH, dispUnits)} H</text>);
+
+  // title block + NTS note
+  const tbY = svgH - 10;
+  if (hasTitleBlock) {
+    const tbText = [projectName, clientName].filter(Boolean).join("  •  ");
+    const tbDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+    elements.push(<text key={K("tb")} x={16} y={tbY} textAnchor="start" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{tbText.toUpperCase()}  •  REV {revision || "01"}  •  {tbDate}</text>);
+  }
+  elements.push(<text key={K("nts")} x={svgW - 16} y={tbY} textAnchor="end" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">NOT TO SCALE — DIMENSIONS GOVERN</text>);
+
+  return { elements, svgW, svgH, scale };
+};
+
+// ---- stress sweep -------------------------------------------------------
+// Renders ~100 configurations into an offscreen root and bbox-audits every
+// label. The collision guarantee, proven config-by-config on demand.
+const sweepConfigs = () => {
+  const cfgs = [];
+  const base = {
+    wallW: 120, wallH: 108, fbOpeningW: 40, fbOpeningH: 30, mantelH: 54, mantelDepth: 8,
+    fbOffsetIn: 0, hasMantel: true, showVesa: true, showOutlet: true, showLowVolt: true,
+    projectName: "Sweep", clientName: "QA", revision: "01",
+    isMobile: false, isTablet: false, viewportW: 1280, heightRef: "center", override: "",
+  };
+  BRANDS.forEach(brand => TV_CATALOG[brand].forEach(sz => {
+    cfgs.push({ ...base, name: `${brand} ${sz} flat/dec/open`, brand, selectedSize: sz, mountType: "flat", dispUnits: "dec", hasFireplace: false });
+    cfgs.push({ ...base, name: `${brand} ${sz} artic/ftin/fp`, brand, selectedSize: sz, mountType: "articulating", dispUnits: "ftin", hasFireplace: true, heightRef: "bottom" });
+  }));
+  BRANDS.forEach(brand => {
+    const sizes = TV_CATALOG[brand];
+    const big = sizes[sizes.length - 1], small = sizes[0];
+    cfgs.push({ ...base, name: `${brand} ${big} high mount`, brand, selectedSize: big, mountType: "flat", dispUnits: "ftin", hasFireplace: false, override: String(108 - tvDims(big).h / 2 - 1) });
+    cfgs.push({ ...base, name: `${brand} ${small} low mount`, brand, selectedSize: small, mountType: "flat", dispUnits: "dec", hasFireplace: false, heightRef: "bottom", override: "12" });
+    cfgs.push({ ...base, name: `${brand} ${small} mobile/frac/fp`, brand, selectedSize: small, mountType: "flat", dispUnits: "frac", hasFireplace: true, isMobile: true, viewportW: 375 });
+  });
+  cfgs.push({ ...base, name: "offsets fb+20 tv−15 ftin", brand: "Sony", selectedSize: 65, mountType: "flat", dispUnits: "ftin", hasFireplace: true, fbOffsetIn: 20, tvOffsetIn: -15 });
+  cfgs.push({ ...base, name: "small wall 84×84 ftin", brand: "Samsung", selectedSize: 43, wallW: 84, wallH: 84, mountType: "flat", dispUnits: "ftin", hasFireplace: false });
+  cfgs.push({ ...base, name: "narrow wall 70×96 mobile", brand: "LG", selectedSize: 48, wallW: 70, wallH: 96, mountType: "articulating", dispUnits: "frac", hasFireplace: false, isMobile: true, viewportW: 375 });
+  // hostile geometry: tiny scale, cramped walls, TV far off-center, max text width
+  cfgs.push({ ...base, name: "giant wall 300×140 ftin", brand: "Samsung", selectedSize: 115, wallW: 300, wallH: 140, mountType: "flat", dispUnits: "ftin", hasFireplace: false });
+  cfgs.push({ ...base, name: "giant wall small TV", brand: "Sony", selectedSize: 42, wallW: 300, wallH: 140, mountType: "flat", dispUnits: "ftin", hasFireplace: false, heightRef: "bottom" });
+  cfgs.push({ ...base, name: "cramped 60×72 ftin", brand: "Samsung", selectedSize: 32, wallW: 60, wallH: 72, mountType: "articulating", dispUnits: "ftin", hasFireplace: false, heightRef: "bottom" });
+  cfgs.push({ ...base, name: "TV hard left", brand: "Sony", selectedSize: 55, mountType: "flat", dispUnits: "ftin", hasFireplace: false, tvOffsetIn: -33 });
+  cfgs.push({ ...base, name: "TV hard right", brand: "Sony", selectedSize: 55, mountType: "flat", dispUnits: "ftin", hasFireplace: false, tvOffsetIn: 33, heightRef: "bottom" });
+  cfgs.push({ ...base, name: "wide TV near top + ftin + fp", brand: "Samsung", selectedSize: 98, mountType: "articulating", dispUnits: "ftin", hasFireplace: true, override: String(108 - tvDims(98).h / 2 - 0.5) });
+  cfgs.push({ ...base, name: "mobile giant wall", brand: "LG", selectedSize: 97, wallW: 280, wallH: 130, mountType: "flat", dispUnits: "frac", hasFireplace: false, isMobile: true, viewportW: 375 });
+  return cfgs;
+};
+
+const runStressSweep = () => {
+  const cfgs = sweepConfigs();
+  const host = document.createElement("div");
+  host.style.cssText = "position:absolute;left:-100000px;top:0;";
+  document.body.appendChild(host);
+  const root = ReactDOM.createRoot(host);
+  const failures = [];
+  cfgs.forEach(cfg => {
+    const recommended = computeRecommendedCenterH({ selectedSize: cfg.selectedSize, hasFireplace: cfg.hasFireplace, hasMantel: cfg.hasMantel, mantelH: cfg.mantelH, fbOpeningH: cfg.fbOpeningH, useViewDist: false, viewDist: 144 });
+    const centerH = computeCenterH({ mountHeightOverride: cfg.override, heightRef: cfg.heightRef, recommendedCenterH: recommended, selectedSize: cfg.selectedSize });
+    const tvCL = computeTvCL({ wallW: cfg.wallW, hasFireplace: cfg.hasFireplace, fbOffsetIn: cfg.fbOffsetIn || 0, tvOffsetIn: cfg.tvOffsetIn || 0 });
+    const boxModel = recommendBackBox(cfg.selectedSize, cfg.mountType, cfg.brand);
+    const layout = computeLayout({ selectedSize: cfg.selectedSize, brand: cfg.brand, centerH, tvCL, showBackBox: true, effectiveBoxModel: boxModel, mountType: cfg.mountType });
+    const schem = buildSchematic({ ...cfg, layout }, SCREEN_PALETTE);
+    ReactDOM.flushSync(() => root.render(
+      <svg width={schem.svgW} height={schem.svgH} viewBox={`0 0 ${schem.svgW} ${schem.svgH}`} xmlns="http://www.w3.org/2000/svg">{schem.elements}</svg>
+    ));
+    const svg = host.querySelector("svg");
+    const rects = Array.from(svg.querySelectorAll("text")).map(t => { const b = t.getBBox(); return { t: t.textContent, x: b.x, y: b.y, w: b.width, h: b.height }; });
+    let overlaps = 0, clipped = 0;
+    const pairs = [];
+    rects.forEach((q, i) => {
+      if (q.x < -1 || q.x + q.w > schem.svgW + 1 || q.y < -1 || q.y + q.h > schem.svgH + 2) { clipped++; pairs.push(`clip: ${q.t}`); }
+      for (let j = i + 1; j < rects.length; j++) {
+        const p = rects[j];
+        if (q.x < p.x + p.w && p.x < q.x + q.w && q.y < p.y + p.h && p.y < q.y + q.h) { overlaps++; pairs.push(`${q.t} ⨯ ${p.t}`); }
+      }
+    });
+    if (overlaps || clipped) failures.push({ name: cfg.name, overlaps, clipped, pairs: pairs.slice(0, 4) });
+  });
+  root.unmount();
+  host.remove();
+  return { total: cfgs.length, failures };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 6 — UI COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const Icon = ({ name, size = 13 }) => {
+  const s = size;
+  const st = "currentColor";
+  const sw = 1.4;
+  const p = {
+    wall: <rect x="2" y="2" width={s-4} height={s-4} fill="none" stroke={st} strokeWidth={sw}/>,
+    fire: <path d={`M${s/2} 3 C${s/2-2} ${s/2}, ${s-4} ${s/2}, ${s/2+1} ${s-3} C${s/2-3} ${s-4}, ${s/2-4} ${s/2+1}, ${s/2} 3 Z`} fill="none" stroke={st} strokeWidth={sw} strokeLinejoin="round"/>,
+    eye: <><path d={`M2 ${s/2} Q${s/2} 2, ${s-2} ${s/2} Q${s/2} ${s-2}, 2 ${s/2} Z`} fill="none" stroke={st} strokeWidth={sw}/><circle cx={s/2} cy={s/2} r="1.6" fill={st}/></>,
+    tv: <><rect x="2" y="3" width={s-4} height={s-7} fill="none" stroke={st} strokeWidth={sw}/><line x1={s/2-3} y1={s-2} x2={s/2+3} y2={s-2} stroke={st} strokeWidth={sw}/></>,
+    mount: <><rect x="3" y={s/2-1} width={s-6} height="2" fill="none" stroke={st} strokeWidth={sw}/><line x1="2" y1="3" x2="2" y2={s-3} stroke={st} strokeWidth={sw}/><line x1={s-2} y1="3" x2={s-2} y2={s-3} stroke={st} strokeWidth={sw}/></>,
+    box: <><rect x="2.5" y="3.5" width={s-5} height={s-7} fill="none" stroke={st} strokeWidth={sw}/><line x1="2.5" y1={s/2} x2={s-2.5} y2={s/2} stroke={st} strokeWidth={sw} strokeDasharray="1.5 1"/></>,
+    plug: <><rect x={s/2-3} y="3" width="6" height={s-6} rx="1" fill="none" stroke={st} strokeWidth={sw}/><circle cx={s/2-1} cy={s/2} r="0.8" fill={st}/><circle cx={s/2+1} cy={s/2} r="0.8" fill={st}/></>,
+    bolt: <path d={`M${s/2+1} 2 L3 ${s/2+1} L${s/2-1} ${s/2+1} L${s/2-2} ${s-2} L${s-3} ${s/2-1} L${s/2+1} ${s/2-1} Z`} fill="none" stroke={st} strokeWidth={sw} strokeLinejoin="round"/>,
+    doc: <><rect x="3" y="2" width={s-6} height={s-4} fill="none" stroke={st} strokeWidth={sw}/><line x1="5" y1={s/2-2} x2={s-5} y2={s/2-2} stroke={st} strokeWidth={sw}/><line x1="5" y1={s/2+1} x2={s-5} y2={s/2+1} stroke={st} strokeWidth={sw}/></>,
+    download: <path d={`M${s/2} 2 L${s/2} ${s-5} M${s/2-3} ${s/2+1} L${s/2} ${s-5} L${s/2+3} ${s/2+1} M3 ${s-2} L${s-3} ${s-2}`} fill="none" stroke={st} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/>,
+    check: <path d={`M3 ${s/2} L${s/2-1} ${s-4} L${s-3} 4`} fill="none" stroke={st} strokeWidth={sw+0.4} strokeLinecap="round" strokeLinejoin="round"/>,
+  };
+  return <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} style={{ display: "inline-block", verticalAlign: "middle" }}>{p[name]}</svg>;
+};
+
+const Sec = ({ icon, title, children, first }) => (
+  <div style={{ marginTop: first ? 0 : 26 }}>
+    <div className="sec-title"><Icon name={icon}/> {title}</div>
+    {children}
+  </div>
+);
+
+const Field = ({ label, children, hint }) => (
+  <div style={{ marginBottom: 10 }}>
+    <div className="lbl">{label}</div>
+    {children}
+    {hint && <div className="hint">{hint}</div>}
+  </div>
+);
+
+const Check = ({ on, onClick, children }) => (
+  <div className="chk-row" onClick={onClick}>
+    <div className={`chk ${on ? "on" : ""}`}>{on && <Icon name="check" size={11}/>}</div>
+    <span>{children}</span>
+  </div>
+);
+
+const Seg = ({ options, value, onChange, small }) => (
+  <div className={`seg ${small ? "small" : ""}`}>
+    {options.map(o => (
+      <button key={o.value} className={`seg-btn ${value === o.value ? "on" : ""}`} onClick={() => onChange(o.value)}>{o.label}</button>
+    ))}
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 7 — APP
+// ═══════════════════════════════════════════════════════════════════════════
+
+export default function App() {
+  const [wallW, setWallW] = useState(SAVED.wallW ?? 120);
+  const [wallH, setWallH] = useState(SAVED.wallH ?? 108);
+  const [hasFireplace, setHasFireplace] = useState(SAVED.hasFireplace ?? false);
+  const [fbOpeningH, setFbOpeningH] = useState(SAVED.fbOpeningH ?? 30);
+  const [fbOpeningW, setFbOpeningW] = useState(SAVED.fbOpeningW ?? 40);
+  const [fbOffsetX, setFbOffsetX] = useState(SAVED.fbOffsetX ?? "");
+  const [hasMantel, setHasMantel] = useState(SAVED.hasMantel ?? true);
+  const [mantelH, setMantelH] = useState(SAVED.mantelH ?? 54);
+  const [mantelDepth, setMantelDepth] = useState(SAVED.mantelDepth ?? 8);
+  const [viewDist, setViewDist] = useState(SAVED.viewDist ?? 144);
+  const [useViewDist, setUseViewDist] = useState(SAVED.useViewDist ?? true);
+  const [brand, setBrand] = useState(SAVED_BRAND);
+  const [selectedSize, setSelectedSize] = useState(SAVED_SIZE);
+  const [tvOffsetX, setTvOffsetX] = useState(SAVED.tvOffsetX ?? "");
+
+  const [mountType, setMountType] = useState(SAVED.mountType === "articulating" ? "articulating" : "flat");
+  const [showBackBox, setShowBackBox] = useState(SAVED.showBackBox ?? true);
+  const [backBoxModel, setBackBoxModel] = useState(BACK_BOXES[SAVED.backBoxModel] ? SAVED.backBoxModel : "FA-WB26");
+  const [autoRecommendBox, setAutoRecommendBox] = useState(SAVED.autoRecommendBox ?? true);
+  const [showOutlet, setShowOutlet] = useState(SAVED.showOutlet ?? true);
+  const [showLowVolt, setShowLowVolt] = useState(SAVED.showLowVolt ?? true);
+  const [showVesa, setShowVesa] = useState(SAVED.showVesa ?? true);
+
+  const [mountHeightOverride, setMountHeightOverride] = useState(SAVED.mountHeightOverride ?? "");
+  const [heightRef, setHeightRef] = useState(SAVED.heightRef === "bottom" ? "bottom" : "center");
+  const [showAllSizes, setShowAllSizes] = useState(SAVED.showAllSizes ?? false);
+  const [projectName, setProjectName] = useState(SAVED.projectName ?? "");
+  const [clientName, setClientName] = useState(SAVED.clientName ?? "");
+  const [revision, setRevision] = useState(SAVED.revision ?? "01");
+  const [dispUnits, setDispUnits] = useState(["dec", "frac", "ftin"].includes(SAVED.dispUnits) ? SAVED.dispUnits : "dec");
+
+  const [viewportW, setViewportW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  const [activePanel, setActivePanel] = useState("drawing");
+  const [showDiag, setShowDiag] = useState(false);
+  const [renderAudit, setRenderAudit] = useState({ overlaps: 0, clipped: 0, checked: 0 });
+  const [importSummary, setImportSummary] = useState(null);
+  const [sweep, setSweep] = useState(null);
+  const [showExport, setShowExport] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const isMobile = viewportW < 768;
+  const isTablet = viewportW >= 768 && viewportW < 1024;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
+        mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
+        mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet,
+        showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes,
+        projectName, clientName, revision, dispUnits,
+      }));
+    } catch { /* storage unavailable — run without persistence */ }
+  }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
+      mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
+      mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet,
+      showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes,
+      projectName, clientName, revision, dispUnits]);
+
+  const resetAll = () => {
+    try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
+    window.location.reload();
+  };
+
+  // ----- engine wiring (thin memos around pure functions) -----
+  const selfTest = useMemo(() => runSelfTests(), []);
+  const fmt = (v) => fmtIn(v, dispUnits);
+
+  const fbOffsetIn = parseFloat(fbOffsetX) || 0;
+  const tvOffsetIn = parseFloat(tvOffsetX) || 0;
+  const engineInputs = { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist };
+
+  const recommendations = useMemo(() => computeRecommendations({ brand, ...engineInputs }),
+    [brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
+
+  const recommendedCenterH = useMemo(() => computeRecommendedCenterH({ selectedSize, ...engineInputs }),
+    [selectedSize, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
+
+  const centerH = useMemo(() => computeCenterH({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize }),
+    [mountHeightOverride, heightRef, recommendedCenterH, selectedSize]);
+
+  const recommendedBox = useMemo(() => recommendBackBox(selectedSize, mountType, brand), [selectedSize, mountType, brand]);
+  const effectiveBoxModel = autoRecommendBox && recommendedBox ? recommendedBox : backBoxModel;
+  const vesaSpec = selectedSize ? (VESA_DATA[brand]?.[selectedSize] || null) : null;
+
+  const tvCL = computeTvCL({ wallW, hasFireplace, fbOffsetIn, tvOffsetIn });
+
+  const layout = useMemo(() => computeLayout({ selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountType }),
+    [selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountType]);
+
+  const placementIssues = useMemo(() => computePlacementIssues({ layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn }),
+    [layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn]);
+
+  // engine-computed display values (UI does no arithmetic)
+  const recommendedDisplayH = heightRef === "bottom" && selectedSize
+    ? recommendedCenterH - tvDims(selectedSize).h / 2 : recommendedCenterH;
+  const equivalentH = selectedSize
+    ? (heightRef === "bottom" ? recommendedCenterH : convertOverride(recommendedCenterH, "bottom", selectedSize))
+    : null;
+
+  // ----- schematic: screen (navy blueprint) + print (white blueline) -----
+  const schemState = {
+    wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
+    mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountType,
+    showVesa, showOutlet, showLowVolt, projectName, clientName, revision,
+    dispUnits, isMobile, isTablet, viewportW,
+  };
+  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE),
+    [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
+     brand, selectedSize, layout, heightRef, mountType, showVesa, showOutlet, showLowVolt,
+     projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
+  const printSchem = useMemo(() => buildSchematic({ ...schemState, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE),
+    [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
+     brand, selectedSize, layout, heightRef, mountType, showVesa, showOutlet, showLowVolt,
+     projectName, clientName, revision, dispUnits]);
+
+  const svgRef = useRef(null);
+  const printRef = useRef(null);
+  const fileRef = useRef(null);
+
+  // render audit: measure every real text bbox; overlaps/out-of-bounds → flag
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const id = setTimeout(() => {
+      try {
+        const texts = Array.from(svg.querySelectorAll("text"));
+        const rects = texts.map(t => { const b = t.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+        let overlaps = 0, clipped = 0;
+        const W = screenSchem.svgW, H = screenSchem.svgH;
+        rects.forEach((r, i) => {
+          if (r.x < -1 || r.x + r.w > W + 1 || r.y < -1 || r.y + r.h > H + 1) clipped++;
+          for (let j = i + 1; j < rects.length; j++) {
+            const q = rects[j];
+            if (r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h) overlaps++;
+          }
+        });
+        setRenderAudit({ overlaps, clipped, checked: rects.length });
+        if (overlaps || clipped) console.warn(`[render audit] ${overlaps} overlaps, ${clipped} clipped labels`);
+      } catch { /* getBBox unavailable mid-layout — skip this pass */ }
+    }, 150);
+    return () => clearTimeout(id);
+  }, [screenSchem]);
+
+  // ----- exports (always from the print/blueline render) -----
+  const exportName = (ext) => {
+    const base = (projectName.trim() || "tv-layout").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "tv-layout";
+    return `${base}-${selectedSize ? selectedSize + "in" : "wall"}.${ext}`;
+  };
+
+  const exportSVG = () => {
+    if (!printRef.current) return;
+    const svgData = new XMLSerializer().serializeToString(printRef.current);
+    const blob = new Blob([svgData], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = exportName("svg");
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const designState = {
+    wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
+    mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
+    mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet,
+    showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes,
+    projectName, clientName, revision, dispUnits,
+  };
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(buildExportJSON(designState, layout), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = exportName("json");
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportDXF = () => {
+    if (!layout) return;
+    const dxf = buildDXF({
+      wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
+      mantelH, mantelDepth, brand, selectedSize, dispUnits, mountType,
+      showVesa, showOutlet, showLowVolt, heightRef, projectName, clientName, revision,
+    }, layout);
+    const blob = new Blob([dxf], { type: "application/dxf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = exportName("dxf");
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // The deliverable trio in one click: data, submittal sheet, CAD geometry.
+  const exportPack = () => { exportJSON(); exportDXF(); exportPDF(); };
+
+  // Apply extracted fields (native or foreign) with the same validation the
+  // boot loader uses. Only sets what was found — never resets the rest.
+  const applyImport = (extracted) => {
+    const f = extracted.fields;
+    const notes = [...extracted.notes];
+    let brandNext = brand;
+    if (f.brand && BRANDS.includes(f.brand)) { brandNext = f.brand; setBrand(f.brand); }
+    if (f.selectedSize != null && typeof f.selectedSize === "number") {
+      const sizes = TV_CATALOG[brandNext];
+      const sz = sizes.includes(f.selectedSize) ? f.selectedSize
+        : sizes.reduce((best, s) => Math.abs(s - f.selectedSize) < Math.abs(best - f.selectedSize) ? s : best, sizes[0]);
+      if (sz !== f.selectedSize) notes.push(`size ${f.selectedSize}" snapped to nearest ${brandNext} catalog size ${sz}"`);
+      setSelectedSize(sz);
+    }
+    const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+    if (num(f.wallW) != null) setWallW(f.wallW);
+    if (num(f.wallH) != null) setWallH(f.wallH);
+    if (typeof f.hasFireplace === "boolean") setHasFireplace(f.hasFireplace);
+    if (num(f.fbOpeningW) != null) setFbOpeningW(f.fbOpeningW);
+    if (num(f.fbOpeningH) != null) setFbOpeningH(f.fbOpeningH);
+    if (typeof f.fbOffsetX === "string" || num(f.fbOffsetX) != null) setFbOffsetX(String(f.fbOffsetX));
+    if (typeof f.hasMantel === "boolean") setHasMantel(f.hasMantel);
+    if (num(f.mantelH) != null) setMantelH(f.mantelH);
+    if (num(f.mantelDepth) != null) setMantelDepth(f.mantelDepth);
+    if (num(f.viewDist) != null) setViewDist(f.viewDist);
+    if (typeof f.useViewDist === "boolean") setUseViewDist(f.useViewDist);
+    if (typeof f.tvOffsetX === "string" || num(f.tvOffsetX) != null) setTvOffsetX(String(f.tvOffsetX));
+    if (f.mountType === "flat" || f.mountType === "articulating") setMountType(f.mountType);
+    if (typeof f.showBackBox === "boolean") setShowBackBox(f.showBackBox);
+    if (BACK_BOXES[f.backBoxModel]) setBackBoxModel(f.backBoxModel);
+    if (typeof f.autoRecommendBox === "boolean") setAutoRecommendBox(f.autoRecommendBox);
+    if (typeof f.showOutlet === "boolean") setShowOutlet(f.showOutlet);
+    if (typeof f.showLowVolt === "boolean") setShowLowVolt(f.showLowVolt);
+    if (typeof f.showVesa === "boolean") setShowVesa(f.showVesa);
+    if (typeof f.mountHeightOverride === "string") setMountHeightOverride(f.mountHeightOverride);
+    if (f.heightRef === "center" || f.heightRef === "bottom") setHeightRef(f.heightRef);
+    if (typeof f.projectName === "string") setProjectName(f.projectName);
+    if (typeof f.clientName === "string") setClientName(f.clientName);
+    if (typeof f.revision === "string") setRevision(f.revision);
+    if (["dec", "frac", "ftin"].includes(f.dispUnits)) setDispUnits(f.dispUnits);
+    setImportSummary({ matched: extracted.matched, ignored: extracted.ignored, notes, native: extracted.native });
+  };
+
+  const importJSONFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        const ex = extractImportedDesign(data);
+        if (!ex.native && ex.matched.length === 0) {
+          setImportSummary({ matched: [], ignored: ex.ignored, notes: ["No TV-relevant fields found in this file"], native: false });
+          return;
+        }
+        applyImport(ex);
+      } catch (err) {
+        setImportSummary({ matched: [], ignored: 0, notes: [`Could not parse JSON: ${err.message}`], native: false });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const exportPNG = () => {
+    if (!printRef.current) return;
+    const svgData = new XMLSerializer().serializeToString(printRef.current);
+    const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = printSchem.svgW * 2;
+      canvas.height = printSchem.svgH * 2;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(2, 2);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (!blob) { URL.revokeObjectURL(url); return; }
+        const purl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = purl;
+        a.download = exportName("png");
+        a.click();
+        URL.revokeObjectURL(purl);
+      });
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
+  const exportPDF = () => {
+    if (!printRef.current || !selectedSize || !layout) return;
+    const svgData = new XMLSerializer().serializeToString(printRef.current);
+    const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+    const sideTxt = (x) => {
+      const d = x - layout.tvCL;
+      if (Math.abs(d) < 0.05) return "on TV centerline";
+      return `${fmt(Math.abs(d))} ${d < 0 ? "left" : "right"} of TV centerline`;
+    };
+    const specRows = [
+      ["TV", `${brand} ${selectedSize}"`],
+      ["TV Width", fmt(layout.tvW)],
+      ["TV Height", fmt(layout.tvH)],
+      ["Center to floor", fmt(layout.centerH)],
+      ["Bottom to floor", fmt(layout.tvBottom)],
+      ["TV centerline", `${fmt(layout.tvCL)} from left wall edge`],
+      ["Mount type", mountType === "flat" ? "Flat" : "Articulating"],
+    ];
+    if (layout.box) {
+      specRows.push(["Back box", `${layout.box.brand} ${layout.box.label}`]);
+      specRows.push(["Box dimensions", `${layout.box.w}" x ${layout.box.h}" x ${layout.box.d}"D`]);
+    }
+    if (showOutlet) specRows.push(["Power outlet", `${fmt(layout.outlet.aff)} AFF, ${sideTxt(layout.outlet.x)}`]);
+    if (showLowVolt) specRows.push(["Low-voltage feed", `${fmt(layout.lv.aff)} AFF, ${sideTxt(layout.lv.x)}`]);
+    if (layout.vesa) {
+      specRows.push(["VESA pattern", `${layout.vesa.spec.w_mm} x ${layout.vesa.spec.h_mm} mm`]);
+      specRows.push(["VESA screw", layout.vesa.spec.screw]);
+    }
+    specRows.push(["Wall dimensions", `${fmt(wallW)} W x ${fmt(wallH)} H`]);
+    if (hasFireplace) {
+      specRows.push(["Fireplace opening", `${fmt(fbOpeningW)} W x ${fmt(fbOpeningH)} H`]);
+      if (fbOffsetIn !== 0) specRows.push(["Fireplace offset", `${fmt(Math.abs(fbOffsetIn))} ${fbOffsetIn < 0 ? "left" : "right"} of wall center`]);
+      if (hasMantel) specRows.push(["Mantel top", `${fmt(mantelH)} from floor`]);
+    }
+    const parts = buildPartsList({ layout, mountType, showOutlet, showLowVolt });
+    const docTitle = projectName.trim() ? `${projectName.trim()} — ${brand} ${selectedSize}"` : `TV Wall Layout — ${brand} ${selectedSize}"`;
+    const metaHtml = "Front Elevation · REV " + (revision || "01") + (clientName.trim() ? "<br/>" + clientName.trim() : "") + "<br/>" + today;
+    const specRowsHtml = specRows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+    const partsHtml = parts.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+    const vesaNote = layout.vesa && layout.vesa.spec.note ? `<p style="margin:8px 0 0 0;"><strong>${brand} ${selectedSize}":</strong> ${layout.vesa.spec.note}</p>` : "";
+    const bbNote = layout.box && layout.box.note ? `<p style="margin:8px 0 0 0;"><strong>Back box:</strong> ${layout.box.note}</p>` : "";
+    const ratingNote = layout.box && layout.box.underRated ? `<p style="margin:8px 0 0 0;"><strong>Check rating:</strong> ${layout.box.label} is rated ${layout.box.tvMin}"–${layout.box.tvMax}" — selected ${selectedSize}".</p>` : "";
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docTitle}</title><style>
+@page { size: letter; margin: 0.5in; }
+body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; margin: 0; padding: 24px; background: white; }
+.header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5px solid #102A43; padding-bottom: 12px; margin-bottom: 22px; }
+.header h1 { margin: 0; font-size: 21px; letter-spacing: -0.3px; }
+.header .meta { font-size: 10px; letter-spacing: 1.5px; color: #5C7186; text-transform: uppercase; text-align: right; line-height: 1.6; }
+.schematic-wrap { text-align: center; margin-bottom: 22px; padding: 14px; background: #FBFCFE; border: 1px solid #C9D6E2; }
+.schematic-wrap svg { max-width: 100%; height: auto; }
+.section-label { font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: #102A43; font-weight: 700; padding-bottom: 6px; border-bottom: 1px solid #C9D6E2; margin-bottom: 10px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 22px; }
+.spec-table { width: 100%; border-collapse: collapse; }
+.spec-table td { padding: 6px 4px; border-bottom: 1px solid #E4EBF2; font-size: 11.5px; font-family: 'IBM Plex Mono', 'Courier New', monospace; }
+.spec-table td:first-child { color: #5C7186; }
+.spec-table td:last-child { text-align: right; font-weight: 600; color: #102A43; }
+.notes-box { background: #F4F7FA; border: 1px solid #8FA8BE; padding: 12px; font-size: 11px; line-height: 1.55; }
+.notes-box h3 { margin: 0 0 8px 0; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #1D3A57; }
+.footer { margin-top: 22px; padding-top: 10px; border-top: 1px solid #C9D6E2; font-size: 9px; color: #5C7186; letter-spacing: 1px; text-transform: uppercase; display: flex; justify-content: space-between; }
+@media print { body { padding: 0; } .no-print { display: none; } }
+.print-btn { position: fixed; top: 12px; right: 12px; padding: 12px 20px; background: #102A43; color: white; border: none; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; font-weight: 600; }
+</style></head><body>
+<button class="print-btn no-print" onclick="window.print()">Print / Save as PDF</button>
+<div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">AV INSTALLATION DRAWING</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
+<div class="schematic-wrap">${svgData}</div>
+<div class="grid2">
+<div><div class="section-label">Specifications</div><table class="spec-table">${specRowsHtml}</table></div>
+<div>
+<div class="section-label">Rough-In Parts</div><table class="spec-table">${partsHtml}</table>
+<div class="section-label" style="margin-top:16px;">Installation Notes</div>
+<div class="notes-box"><h3>Field verification</h3><p style="margin:0 0 8px 0;">Verify TV VESA pattern and dimensions against the manufacturer spec sheet before drilling. Values are calculated from published specifications and may vary by model variant.</p>${vesaNote}${bbNote}${ratingNote}</div>
+</div>
+</div>
+<div class="footer"><span>Generated ${today} · REV ${revision || "01"}</span><span>NOT TO SCALE — DIMENSIONS GOVERN</span></div>
+<script>window.addEventListener("load", function() { setTimeout(function() { window.print(); }, 500); });</script>
+</body></html>`;
+
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); }
+    else alert("Please allow pop-ups to export PDF");
+  };
+
+  // ----- handlers -----
+  const switchHeightRef = (toRef) => {
+    if (heightRef === toRef) return;
+    setHeightRef(toRef);
+    setMountHeightOverride(prev => {
+      const v = parseFloat(prev);
+      if (isNaN(v) || !selectedSize) return "";
+      const conv = convertOverride(v, toRef, selectedSize);
+      return conv == null ? "" : conv.toFixed(1);
+    });
+  };
+
+  const allTestsPass = selfTest.passed === selfTest.total;
+  const auditClean = renderAudit.overlaps === 0 && renderAudit.clipped === 0;
+
+  // ----- shared UI fragments -----
+  const setupPanel = (
+    <>
+      <Sec icon="doc" title="Project" first>
+        <Field label="Project / Address"><input className="inp" type="text" placeholder="e.g. Smith Residence" value={projectName} onChange={e => setProjectName(e.target.value)}/></Field>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
+          <Field label="Client"><input className="inp" type="text" placeholder="optional" value={clientName} onChange={e => setClientName(e.target.value)}/></Field>
+          <Field label="Rev"><input className="inp" type="text" value={revision} onChange={e => setRevision(e.target.value)}/></Field>
+        </div>
+      </Sec>
+
+      <Sec icon="wall" title="Wall">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Width (in)"><input className="inp" type="number" value={wallW} onChange={e => setWallW(+e.target.value || 0)}/></Field>
+          <Field label="Height (in)"><input className="inp" type="number" value={wallH} onChange={e => setWallH(+e.target.value || 0)}/></Field>
+        </div>
+      </Sec>
+
+      <Sec icon="fire" title="Fireplace">
+        <Check on={hasFireplace} onClick={() => setHasFireplace(!hasFireplace)}>Wall has fireplace</Check>
+        {hasFireplace && (
+          <div style={{ paddingLeft: 4, marginTop: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label="Opening W"><input className="inp" type="number" value={fbOpeningW} onChange={e => setFbOpeningW(+e.target.value || 0)}/></Field>
+              <Field label="Opening H"><input className="inp" type="number" value={fbOpeningH} onChange={e => setFbOpeningH(+e.target.value || 0)}/></Field>
+            </div>
+            <Field label="Offset from wall center (in)" hint="+ right / − left — TV follows fireplace center">
+              <input className="inp" type="number" placeholder="0 = centered" value={fbOffsetX} onChange={e => setFbOffsetX(e.target.value)}/>
+            </Field>
+            <Check on={hasMantel} onClick={() => setHasMantel(!hasMantel)}>Has mantel</Check>
+            {hasMantel && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
+                <Field label="Mantel top H"><input className="inp" type="number" value={mantelH} onChange={e => setMantelH(+e.target.value || 0)}/></Field>
+                <Field label="Thickness"><input className="inp" type="number" value={mantelDepth} onChange={e => setMantelDepth(+e.target.value || 0)}/></Field>
+              </div>
+            )}
+          </div>
+        )}
+      </Sec>
+
+      <Sec icon="eye" title="Viewing">
+        <Check on={useViewDist} onClick={() => setUseViewDist(!useViewDist)}>Factor viewing distance</Check>
+        {useViewDist && (
+          <Field label="Distance to seating (in)" hint={`${(viewDist / 12).toFixed(1)} ft — sizing guide only`}>
+            <input className="inp" type="number" value={viewDist} onChange={e => setViewDist(+e.target.value || 0)}/>
+          </Field>
+        )}
+      </Sec>
+
+      <Sec icon="tv" title="Brand">
+        <Seg options={BRANDS.map(b => ({ value: b, label: b }))} value={brand} onChange={(b) => { setBrand(b); setSelectedSize(null); }}/>
+      </Sec>
+
+      <Sec icon="mount" title="Mount">
+        <Seg options={[{ value: "flat", label: "Flat" }, { value: "articulating", label: "Articulating" }]} value={mountType} onChange={setMountType}/>
+        <div className="hint" style={{ marginTop: 6, marginBottom: 14 }}>
+          {mountType === "flat" ? "Low-profile, tight to wall. Best for straight-on viewing." : "Full-motion: pulls out, swivels, tilts. Recommended for fireplace installs or off-axis seating."}
+        </div>
+        <Field label={`Height reference`}>
+          <Seg options={[{ value: "center", label: "From Center" }, { value: "bottom", label: "From Bottom" }]} value={heightRef} onChange={switchHeightRef}/>
+        </Field>
+        <div className="stat"><span>Recommended {heightRef}</span><strong>{fmt(recommendedDisplayH)}</strong></div>
+        {selectedSize && equivalentH != null && (
+          <div className="stat dim"><span>{heightRef === "bottom" ? "Center equivalent" : "Bottom equivalent"}</span><strong>{fmt(equivalentH)}</strong></div>
+        )}
+        <Field label={`Override — to ${heightRef} (in)`}>
+          <input className="inp" type="number" placeholder={recommendedDisplayH.toFixed(1)} value={mountHeightOverride} onChange={e => setMountHeightOverride(e.target.value)}/>
+        </Field>
+        <Field label={`Horizontal offset from ${hasFireplace ? "fireplace" : "wall"} center (in)`}
+               hint={`+ right / − left${layout ? ` — TV CL at ${fmt(layout.tvCL)} from left` : ""}`}>
+          <input className="inp" type="number" placeholder="0 = centered" value={tvOffsetX} onChange={e => setTvOffsetX(e.target.value)}/>
+        </Field>
+        {placementIssues.length > 0 && (
+          <div className="warn-box">
+            <div className="warn-title">PLACEMENT OUT OF RANGE</div>
+            {placementIssues.map((iss, i) => <div key={i}>• {iss}</div>)}
+          </div>
+        )}
+      </Sec>
+
+      <Sec icon="box" title="Back Box">
+        <Check on={showBackBox} onClick={() => setShowBackBox(!showBackBox)}>Include back box</Check>
+        {showBackBox && (
+          <>
+            <Check on={autoRecommendBox} onClick={() => setAutoRecommendBox(!autoRecommendBox)}>Auto-recommend for TV size</Check>
+            {selectedSize && recommendedBox && autoRecommendBox && (
+              <div className="rec-box">
+                <div className="rec-tag">RECOMMENDED</div>
+                <div style={{ fontWeight: 600 }}>{BACK_BOXES[recommendedBox].brand}</div>
+                <div>{BACK_BOXES[recommendedBox].label}</div>
+                <div style={{ fontSize: 10, opacity: 0.75, marginTop: 3 }}>
+                  {BACK_BOXES[recommendedBox].w}" × {BACK_BOXES[recommendedBox].h}" × {BACK_BOXES[recommendedBox].d}"D — {BACK_BOXES[recommendedBox].bracket}
+                </div>
+                {BACK_BOXES[recommendedBox].note && <div style={{ fontSize: 10, opacity: 0.85, marginTop: 3, fontStyle: "italic" }}>{BACK_BOXES[recommendedBox].note}</div>}
+              </div>
+            )}
+            {!autoRecommendBox && (
+              <Field label="Manual selection">
+                <select className="inp" value={backBoxModel} onChange={e => setBackBoxModel(e.target.value)}>
+                  <optgroup label="Future Automation — WB Range">
+                    {Object.entries(BACK_BOXES).filter(([, v]) => v.brand === "Future Automation").map(([k, v]) => (
+                      <option key={k} value={k}>{v.label} ({v.bracket})</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="SnapAV Strong — VersaBox">
+                    {Object.entries(BACK_BOXES).filter(([, v]) => v.brand === "SnapAV Strong").map(([k, v]) => (
+                      <option key={k} value={k}>{v.label}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </Field>
+            )}
+            {layout?.box?.underRated && (
+              <div className="note-box">
+                <strong>Check rating:</strong> {layout.box.label} is rated for {layout.box.tvMin}"–{layout.box.tvMax}" TVs — selected {selectedSize}". Verify bracket compatibility.
+              </div>
+            )}
+          </>
+        )}
+      </Sec>
+
+      <Sec icon="plug" title="Electrical">
+        <Check on={showOutlet} onClick={() => setShowOutlet(!showOutlet)}>Recessed outlet</Check>
+        <Check on={showLowVolt} onClick={() => setShowLowVolt(!showLowVolt)}>Low-voltage feed</Check>
+      </Sec>
+
+      {showVesa !== null && (
+        <Sec icon="bolt" title="VESA">
+          <Check on={showVesa} onClick={() => setShowVesa(!showVesa)}>Show VESA on drawing</Check>
+          {showVesa && selectedSize && vesaSpec && (
+            <div className="vesa-box">
+              <div className="rec-tag">{brand.toUpperCase()} {selectedSize}" · 2024/25</div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{vesaSpec.w_mm} × {vesaSpec.h_mm} mm</div>
+              <div style={{ fontSize: 10, marginTop: 2 }}>{mmToIn(vesaSpec.w_mm).toFixed(2)}" × {mmToIn(vesaSpec.h_mm).toFixed(2)}" — {vesaSpec.screw} screw</div>
+              {vesaSpec.voffset_pct !== 0 && <div style={{ fontSize: 10, marginTop: 3 }}>Pattern {Math.abs(vesaSpec.voffset_pct)}% {vesaSpec.voffset_pct < 0 ? "below" : "above"} TV center</div>}
+              {vesaSpec.note && <div style={{ fontSize: 10, marginTop: 3, fontStyle: "italic" }}>{vesaSpec.note}</div>}
+              <div style={{ fontSize: 9, marginTop: 6, paddingTop: 6, borderTop: "1px dashed currentColor", opacity: 0.8 }}>Verify with spec sheet before drilling</div>
+            </div>
+          )}
+        </Sec>
+      )}
+    </>
+  );
+
+  const sizeStrip = (
+    <div className="size-strip-wrap">
+      <div className="size-strip-head">
+        <span className="strip-title">{showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`}</span>
+        <button className={`chip ${showAllSizes ? "on" : ""}`} onClick={() => setShowAllSizes(!showAllSizes)}>SHOW ALL</button>
+      </div>
+      <div className="size-strip">
+        {(showAllSizes ? TV_CATALOG[brand] : recommendations).map(sz => {
+          const fitIssues = computeFitIssues(sz, engineInputs);
+          const isRec = recommendations.includes(sz);
+          const active = selectedSize === sz;
+          return (
+            <div key={sz}
+                 className={`size-card ${active ? "on" : ""} ${!isRec ? "warn" : ""}`}
+                 onClick={() => setSelectedSize(sz)}
+                 title={fitIssues[0] || "Recommended fit"}>
+              <div className="size-num">{sz}</div>
+              <div className="size-sub">{!isRec ? "CHECK FIT" : "INCH"}</div>
+            </div>
+          );
+        })}
+        {(showAllSizes ? TV_CATALOG[brand] : recommendations).length === 0 && (
+          <div className="hint" style={{ padding: 12 }}>No sizes fit these dimensions — adjust the wall or enable SHOW ALL.</div>
+        )}
+      </div>
+      {selectedSize && !recommendations.includes(selectedSize) && (
+        <div className="warn-box" style={{ marginTop: 8 }}>
+          <div className="warn-title">NOT A RECOMMENDED FIT</div>
+          {computeFitIssues(selectedSize, engineInputs).map((iss, i) => <div key={i}>• {iss}</div>)}
+          {computeFitIssues(selectedSize, engineInputs).length === 0 && <div>Outside typical proportional guidelines for this wall.</div>}
+        </div>
+      )}
+    </div>
+  );
+
+  const statusBar = (
+    <div className="status-bar">
+      <div className="status-vals">
+        {layout ? (
+          <>
+            <span className="sv"><em>CL</em> {fmt(layout.tvCL)}</span>
+            <span className="sv"><em>CTR</em> {fmt(layout.centerH)}</span>
+            <span className="sv"><em>BTM</em> {fmt(layout.tvBottom)}</span>
+            {showOutlet && <span className="sv"><em>PWR</em> {fmt(layout.outlet.aff)}</span>}
+            {layout.vesa && <span className="sv"><em>VESA</em> {layout.vesa.spec.w_mm}×{layout.vesa.spec.h_mm} {layout.vesa.spec.screw}</span>}
+            {layout.box && <span className="sv"><em>BOX</em> {layout.box.label}</span>}
+          </>
+        ) : (
+          <span className="sv dim-sv">SELECT A TV SIZE</span>
+        )}
+      </div>
+      <div className="status-right">
+        <Seg small options={[{ value: "dec", label: ".0" }, { value: "frac", label: "1/8" }, { value: "ftin", label: "FT-IN" }]} value={dispUnits} onChange={setDispUnits}/>
+        <button className={`diag-badge ${allTestsPass && auditClean ? "ok" : "bad"}`} onClick={() => setShowDiag(!showDiag)}
+                title="Self-test + render audit — click for diagnostics">
+          {allTestsPass ? "✓" : "✕"} {selfTest.passed}/{selfTest.total}
+        </button>
+      </div>
+    </div>
+  );
+
+  const diagPanel = showDiag && (
+    <div className="diag-panel">
+      <div className="diag-head">
+        <span>DIAGNOSTICS</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="chip" onClick={() => setSweep(runStressSweep())} title="Render every configuration offscreen and audit for collisions">SWEEP</button>
+          <button className="chip" onClick={() => {
+            const report = [
+              `TV WALL PLANNER DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`,
+              `Self-tests: ${selfTest.passed}/${selfTest.total} ${allTestsPass ? "PASS" : "FAIL"}`,
+              `Render audit: ${renderAudit.overlaps} overlaps, ${renderAudit.clipped} clipped (${renderAudit.checked} labels)`,
+              sweep ? `Stress sweep: ${sweep.failures.length} failing configs / ${sweep.total}` : `Stress sweep: not run`,
+              ``,
+              ...selfTest.results.map(r => `[${r.group}] ${r.pass ? "PASS" : "FAIL"} — ${r.name}${r.detail && !r.pass ? ` :: ${r.detail}` : ""}`),
+              ...(sweep && sweep.failures.length ? [``, ...sweep.failures.map(f => `[sweep] FAIL — ${f.name}: ${f.overlaps} overlaps, ${f.clipped} clipped :: ${f.pairs.join(" | ")}`)] : []),
+              ``,
+              `State: ${JSON.stringify({ wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetX, hasMantel, mantelH, brand, selectedSize, tvOffsetX, mountType, effectiveBoxModel, mountHeightOverride, heightRef, dispUnits })}`,
+              `Env: ${navigator.userAgent} · viewport ${viewportW}px · scale ${screenSchem.scale.toFixed(3)} px/in`,
+            ].join("\n");
+            try { navigator.clipboard.writeText(report); } catch {}
+          }}>COPY REPORT</button>
+          <button className="chip" onClick={() => setShowDiag(false)}>CLOSE</button>
+        </div>
+      </div>
+      <div className="diag-row head-row"><span>Render audit</span><span className={auditClean ? "p" : "f"}>{renderAudit.overlaps} overlaps · {renderAudit.clipped} clipped · {renderAudit.checked} labels</span></div>
+      {sweep && (
+        <>
+          <div className="diag-row head-row"><span>Stress sweep</span><span className={sweep.failures.length === 0 ? "p" : "f"}>{sweep.failures.length} failing / {sweep.total} configs</span></div>
+          {sweep.failures.slice(0, 8).map((f, i) => (
+            <div key={i} className="diag-row"><span>{f.name}</span><span className="f">{f.pairs.join(" | ")}</span></div>
+          ))}
+        </>
+      )}
+      {["golden", "format", "interop", "invariant"].map(g => (
+        <div key={g}>
+          <div className="diag-group">{g.toUpperCase()}</div>
+          {selfTest.results.filter(r => r.group === g).map((r, i) => (
+            <div key={i} className="diag-row">
+              <span>{r.name}</span>
+              <span className={r.pass ? "p" : "f"}>{r.pass ? "PASS" : `FAIL ${r.detail}`}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
+  const exportBtns = (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="menu-wrap">
+        <button className="btn" onClick={() => setShowExport(!showExport)} disabled={!selectedSize}>
+          <Icon name="download" size={11}/> EXPORT ▾
+        </button>
+        {showExport && (
+          <>
+            <div className="menu-backdrop" onClick={() => setShowExport(false)}/>
+            <div className="menu">
+              <button className="menu-item primary" onClick={() => { setShowExport(false); exportPack(); }}>
+                ★ FULL PACK<span className="menu-sub">PDF + JSON + DXF in one shot</span>
+              </button>
+              <div className="menu-sep"/>
+              <button className="menu-item" onClick={() => { setShowExport(false); exportPDF(); }}>
+                PDF<span className="menu-sub">submittal sheet — specs + parts</span>
+              </button>
+              <button className="menu-item" onClick={() => { setShowExport(false); exportJSON(); }}>
+                JSON<span className="menu-sub">design + computed values for other apps</span>
+              </button>
+              <button className="menu-item" onClick={() => { setShowExport(false); exportDXF(); }}>
+                DXF<span className="menu-sub">Visio / AutoCAD / Bluebeam — true scale, layered</span>
+              </button>
+              <div className="menu-sep"/>
+              <button className="menu-item" onClick={() => { setShowExport(false); exportPNG(); }}>
+                PNG<span className="menu-sub">blueline raster image</span>
+              </button>
+              <button className="menu-item" onClick={() => { setShowExport(false); exportSVG(); }}>
+                SVG<span className="menu-sub">blueline vector image</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+      <button className="btn ghost" onClick={() => fileRef.current && fileRef.current.click()} title="Import a design or pull TV fields from another app's JSON">IMPORT</button>
+      <button className="btn ghost" onClick={resetAll} title="Clear saved design">RESET</button>
+      <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: "none" }}
+             onChange={e => { const f = e.target.files && e.target.files[0]; if (f) importJSONFile(f); e.target.value = ""; }}/>
+    </div>
+  );
+
+  const importBanner = importSummary && (
+    <div className="import-note">
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="rec-tag" style={{ marginBottom: 4 }}>{importSummary.native ? "DESIGN IMPORTED" : `IMPORT — ${importSummary.matched.length} FIELD${importSummary.matched.length === 1 ? "" : "S"} MATCHED, ${importSummary.ignored} IGNORED`}</div>
+        {importSummary.matched.length > 0 && !importSummary.native && (
+          <div style={{ fontSize: 11 }}>{importSummary.matched.join(" · ")}</div>
+        )}
+        {importSummary.notes.map((n, i) => <div key={i} style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}>• {n}</div>)}
+      </div>
+      <button className="chip" onClick={() => setImportSummary(null)}>DISMISS</button>
+    </div>
+  );
+
+  const canvas = (
+    <div className="canvas-panel">
+      <svg ref={svgRef} width={screenSchem.svgW} height={screenSchem.svgH}
+           viewBox={`0 0 ${screenSchem.svgW} ${screenSchem.svgH}`}
+           xmlns="http://www.w3.org/2000/svg" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 auto" }}
+           preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <pattern id="grid-scr" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke={SCREEN_PALETTE.grid} strokeWidth="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill={SCREEN_PALETTE.canvas}/>
+        <rect width="100%" height="100%" fill="url(#grid-scr)"/>
+        <text x={screenSchem.svgW - 16} y={18} textAnchor="end" fontSize="9" fill={SCREEN_PALETTE.title} fontFamily="'IBM Plex Mono', monospace" letterSpacing="2">FRONT ELEVATION</text>
+        <text x={16} y={18} fontSize="9" fill={SCREEN_PALETTE.title} fontFamily="'IBM Plex Mono', monospace" letterSpacing="2">{selectedSize ? `${brand.toUpperCase()} ${selectedSize}"` : "SELECT TV SIZE"}</text>
+        {screenSchem.elements}
+      </svg>
+    </div>
+  );
+
+  // hidden blueline render — what exports serialize
+  const printSvg = (
+    <div style={{ position: "absolute", left: -100000, top: 0, width: 0, height: 0, overflow: "hidden" }} aria-hidden="true">
+      <svg ref={printRef} width={printSchem.svgW} height={printSchem.svgH}
+           viewBox={`0 0 ${printSchem.svgW} ${printSchem.svgH}`} xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="grid-prt" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke={PRINT_PALETTE.grid} strokeWidth="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill={PRINT_PALETTE.canvas}/>
+        <rect width="100%" height="100%" fill="url(#grid-prt)"/>
+        <text x={printSchem.svgW - 16} y={18} textAnchor="end" fontSize="9" fill={PRINT_PALETTE.title} fontFamily="'IBM Plex Mono', monospace" letterSpacing="2">FRONT ELEVATION</text>
+        <text x={16} y={18} fontSize="9" fill={PRINT_PALETTE.title} fontFamily="'IBM Plex Mono', monospace" letterSpacing="2">{selectedSize ? `${brand.toUpperCase()} ${selectedSize}"` : ""}</text>
+        {printSchem.elements}
+      </svg>
+    </div>
+  );
+
+  return (
+    <div className="app">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+        :root {
+          --ink: #0B1622; --ink2: #0D1B2A; --panel: #112236; --panel2: #16293F;
+          --line: rgba(232,238,245,0.10); --line2: rgba(232,238,245,0.18);
+          --txt: #E8EEF5; --txt2: #8DA3B8; --txt3: #5C7186;
+          --acc: #3ECFE0; --warn: #FF5C4D; --ok: #4ADE80; --amber: #FFD166;
+          --fd: 'Space Grotesk', sans-serif; --fm: 'IBM Plex Mono', monospace;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; background: var(--ink); }
+        .app { min-height: 100vh; background: var(--ink); color: var(--txt); font-family: var(--fd); }
+        .hdr { display: flex; justify-content: space-between; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; gap: 10px; }
+        .hdr h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; margin: 0; }
+        .hdr .sub { font-family: var(--fm); font-size: 9px; letter-spacing: 2px; color: var(--txt3); margin-top: 2px; }
+        .hdr-proj { font-family: var(--fm); font-size: 11px; color: var(--txt2); }
+        .sec-title { font-family: var(--fm); font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--txt2); font-weight: 600; padding-bottom: 7px; border-bottom: 1px solid var(--line); margin-bottom: 12px; display: flex; align-items: center; gap: 7px; }
+        .lbl { font-family: var(--fm); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--txt3); margin-bottom: 5px; }
+        .hint { font-family: var(--fm); font-size: 10px; color: var(--txt3); margin-top: 4px; line-height: 1.5; }
+        .inp { width: 100%; padding: 9px 11px; border: 1px solid var(--line2); background: var(--ink2); font-family: var(--fm); font-size: 15px; color: var(--txt); outline: none; border-radius: 4px; min-height: 42px; transition: border-color .15s; -webkit-appearance: none; appearance: none; }
+        .inp:focus { border-color: var(--acc); }
+        select.inp { background-image: linear-gradient(45deg, transparent 50%, var(--txt2) 50%), linear-gradient(135deg, var(--txt2) 50%, transparent 50%); background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
+        .chk-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; font-size: 13.5px; min-height: 40px; user-select: none; -webkit-user-select: none; color: var(--txt); }
+        .chk { width: 18px; height: 18px; border: 1.4px solid var(--line2); border-radius: 4px; background: var(--ink2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .15s; color: var(--ink); }
+        .chk.on { background: var(--acc); border-color: var(--acc); }
+        .seg { display: flex; background: var(--ink2); border: 1px solid var(--line2); border-radius: 5px; padding: 3px; gap: 3px; }
+        .seg-btn { flex: 1; padding: 8px 10px; border: none; background: transparent; color: var(--txt2); font-family: var(--fm); font-size: 11px; letter-spacing: 0.5px; cursor: pointer; border-radius: 3px; transition: all .15s; min-height: 34px; }
+        .seg-btn.on { background: var(--panel2); color: var(--txt); box-shadow: inset 0 0 0 1px var(--line2); }
+        .seg.small .seg-btn { padding: 4px 8px; font-size: 9px; min-height: 24px; }
+        .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; font-family: var(--fm); color: var(--txt2); gap: 8px; }
+        .stat strong { color: var(--txt); font-weight: 600; }
+        .stat.dim { opacity: 0.6; }
+        .warn-box { margin-top: 10px; padding: 9px 11px; background: rgba(255,92,77,0.08); border: 1px solid rgba(255,92,77,0.5); border-radius: 4px; color: #FFB4AC; font-family: var(--fm); font-size: 11px; line-height: 1.55; }
+        .warn-title { font-size: 9px; letter-spacing: 2px; color: var(--warn); margin-bottom: 4px; font-weight: 700; }
+        .note-box { margin-top: 8px; padding: 8px 10px; background: rgba(255,209,102,0.07); border: 1px solid rgba(255,209,102,0.4); border-radius: 4px; color: #F0D9A0; font-family: var(--fm); font-size: 10px; line-height: 1.5; }
+        .rec-box { margin-top: 8px; padding: 9px 11px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 4px; font-family: var(--fm); font-size: 11px; line-height: 1.5; color: var(--txt); }
+        .rec-tag { font-size: 8px; letter-spacing: 2px; color: var(--acc); margin-bottom: 3px; font-weight: 700; }
+        .vesa-box { margin-top: 8px; padding: 9px 11px; background: rgba(255,209,102,0.06); border: 1px solid rgba(255,209,102,0.35); border-radius: 4px; font-family: var(--fm); font-size: 11px; line-height: 1.5; color: #F0D9A0; }
+        .vesa-box .rec-tag { color: var(--amber); }
+        .size-strip-wrap { width: 100%; }
+        .size-strip-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .strip-title { font-family: var(--fm); font-size: 10px; letter-spacing: 2px; color: var(--txt2); font-weight: 600; }
+        .size-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+        .size-card { min-width: 68px; padding: 10px 8px; border: 1px solid var(--line2); border-radius: 5px; background: var(--panel); cursor: pointer; text-align: center; transition: all .15s; flex-shrink: 0; }
+        .size-card:hover { border-color: var(--acc); }
+        .size-card.on { background: var(--acc); border-color: var(--acc); color: var(--ink); }
+        .size-card.warn { border-style: dashed; opacity: 0.75; }
+        .size-card.warn .size-sub { color: var(--warn); }
+        .size-card.on .size-sub { color: var(--ink); opacity: 0.7; }
+        .size-num { font-family: var(--fd); font-size: 20px; font-weight: 700; line-height: 1; }
+        .size-sub { font-family: var(--fm); font-size: 7px; letter-spacing: 1.5px; margin-top: 4px; color: var(--txt3); }
+        .chip { padding: 4px 10px; border: 1px solid var(--line2); background: transparent; color: var(--txt2); font-family: var(--fm); font-size: 9px; letter-spacing: 1px; cursor: pointer; border-radius: 3px; transition: all .15s; }
+        .chip.on, .chip:hover { border-color: var(--acc); color: var(--acc); }
+        .canvas-panel { background: var(--ink2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .import-note { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; background: rgba(62,207,224,0.07); border: 1px solid rgba(62,207,224,0.4); border-radius: 5px; font-family: var(--fm); color: #B8E8EF; line-height: 1.5; }
+        .menu-wrap { position: relative; }
+        .menu-backdrop { position: fixed; inset: 0; z-index: 79; }
+        .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 290px; background: var(--panel); border: 1px solid var(--line2); border-radius: 6px; padding: 6px; z-index: 80; box-shadow: 0 14px 44px rgba(0,0,0,0.55); }
+        .menu-item { display: block; width: 100%; text-align: left; padding: 9px 12px; background: transparent; border: none; color: var(--txt); font-family: var(--fm); font-size: 11.5px; letter-spacing: 0.5px; cursor: pointer; border-radius: 4px; }
+        .menu-item:hover { background: var(--panel2); }
+        .menu-item.primary { color: var(--acc); font-weight: 700; }
+        .menu-sub { display: block; font-size: 9px; color: var(--txt3); letter-spacing: 0.3px; margin-top: 2px; font-weight: 400; }
+        .menu-sep { height: 1px; background: var(--line); margin: 5px 4px; }
+        .status-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; flex-wrap: wrap; }
+        .status-vals { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--fm); font-size: 11px; }
+        .sv { color: var(--txt); white-space: nowrap; }
+        .sv em { font-style: normal; color: var(--txt3); font-size: 9px; letter-spacing: 1px; margin-right: 3px; }
+        .dim-sv { color: var(--txt3); letter-spacing: 1.5px; font-size: 10px; }
+        .status-right { display: flex; gap: 8px; align-items: center; }
+        .diag-badge { font-family: var(--fm); font-size: 10px; padding: 4px 9px; border-radius: 3px; border: 1px solid; cursor: pointer; background: transparent; }
+        .diag-badge.ok { color: var(--ok); border-color: rgba(74,222,128,0.5); }
+        .diag-badge.bad { color: var(--warn); border-color: rgba(255,92,77,0.6); }
+        .diag-panel { position: fixed; right: 14px; bottom: 14px; width: min(520px, calc(100vw - 28px)); max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line2); border-radius: 6px; padding: 12px; z-index: 60; box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+        .diag-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--fm); font-size: 10px; letter-spacing: 2px; color: var(--txt2); margin-bottom: 10px; }
+        .diag-group { font-family: var(--fm); font-size: 9px; letter-spacing: 2px; color: var(--txt3); margin: 10px 0 4px; }
+        .diag-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-family: var(--fm); font-size: 10px; color: var(--txt2); border-bottom: 1px solid var(--line); }
+        .diag-row.head-row { color: var(--txt); }
+        .diag-row .p { color: var(--ok); }
+        .diag-row .f { color: var(--warn); }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border: 1px solid var(--acc); background: var(--acc); color: var(--ink); font-family: var(--fm); font-size: 10px; letter-spacing: 1.5px; font-weight: 600; cursor: pointer; border-radius: 4px; min-height: 38px; transition: all .15s; }
+        .btn:hover:not(:disabled) { filter: brightness(1.1); }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn.ghost { background: transparent; color: var(--txt2); border-color: var(--line2); }
+        .btn.ghost:hover:not(:disabled) { color: var(--txt); border-color: var(--txt2); filter: none; }
+        .tab-bar { display: flex; border-bottom: 1px solid var(--line); background: var(--ink2); position: sticky; top: 0; z-index: 10; }
+        .tab { flex: 1; padding: 13px 8px; border: none; background: transparent; border-bottom: 2px solid transparent; font-family: var(--fm); font-size: 10px; letter-spacing: 2px; cursor: pointer; color: var(--txt3); font-weight: 600; }
+        .tab.on { color: var(--txt); border-bottom-color: var(--acc); }
+        .sidebar { border-right: 1px solid var(--line); padding: 20px; overflow-y: auto; background: var(--ink); }
+        .main-col { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        input[type="number"] { -moz-appearance: textfield; }
+        input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        ::-webkit-scrollbar { height: 8px; width: 8px; }
+        ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+      `}</style>
+
+      <header className="hdr">
+        <div>
+          <h1>TV WALL PLANNER</h1>
+          <div className="sub">BLUEPRINT EDITION · REV {revision || "01"} · FRONT ELEVATION</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          {projectName && <span className="hdr-proj">{projectName}{clientName ? ` — ${clientName}` : ""}</span>}
+          {!isMobile && exportBtns}
+        </div>
+      </header>
+
+      {isMobile && (
+        <div className="tab-bar">
+          <button className={`tab ${activePanel === "setup" ? "on" : ""}`} onClick={() => setActivePanel("setup")}>SETUP</button>
+          <button className={`tab ${activePanel === "drawing" ? "on" : ""}`} onClick={() => setActivePanel("drawing")}>DRAWING</button>
+          <button className={`tab ${activePanel === "specs" ? "on" : ""}`} onClick={() => setActivePanel("specs")}>SPECS</button>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : (isTablet ? "290px 1fr" : "320px 1fr"), minHeight: "calc(100vh - 70px)" }}>
+        <aside className="sidebar" style={{ display: isMobile && activePanel !== "setup" ? "none" : "block" }}>
+          {setupPanel}
+        </aside>
+
+        <main className="main-col" style={{ display: isMobile && activePanel !== "drawing" ? "none" : "flex" }}>
+          {importBanner}
+          {sizeStrip}
+          {canvas}
+          {statusBar}
+          {isMobile && <div style={{ display: "flex", justifyContent: "center" }}>{exportBtns}</div>}
+        </main>
+
+        {isMobile && activePanel === "specs" && (
+          <div className="main-col">
+            <div className="sec-title" style={{ marginTop: 0 }}><Icon name="doc"/> SPEC SUMMARY</div>
+            {layout ? (
+              <div className="rec-box" style={{ marginTop: 0 }}>
+                <div className="stat"><span>TV</span><strong>{brand} {selectedSize}"</strong></div>
+                <div className="stat"><span>TV Width</span><strong>{fmt(layout.tvW)}</strong></div>
+                <div className="stat"><span>TV Height</span><strong>{fmt(layout.tvH)}</strong></div>
+                <div className="stat"><span>Center AFF</span><strong>{fmt(layout.centerH)}</strong></div>
+                <div className="stat"><span>Bottom AFF</span><strong>{fmt(layout.tvBottom)}</strong></div>
+                <div className="stat"><span>TV CL from left</span><strong>{fmt(layout.tvCL)}</strong></div>
+                {showOutlet && <div className="stat"><span>Outlet AFF</span><strong>{fmt(layout.outlet.aff)}</strong></div>}
+                {showLowVolt && <div className="stat"><span>LV AFF</span><strong>{fmt(layout.lv.aff)}</strong></div>}
+                {layout.vesa && <div className="stat"><span>VESA</span><strong>{layout.vesa.spec.w_mm}×{layout.vesa.spec.h_mm} {layout.vesa.spec.screw}</strong></div>}
+                {layout.box && <div className="stat"><span>Back box</span><strong>{layout.box.label}</strong></div>}
+              </div>
+            ) : <div className="hint">Select a TV size on the DRAWING tab.</div>}
+            {layout && (
+              <>
+                <div className="sec-title"><Icon name="box"/> ROUGH-IN PARTS</div>
+                <div className="rec-box" style={{ marginTop: 0 }}>
+                  {buildPartsList({ layout, mountType, showOutlet, showLowVolt }).map((r, i) => (
+                    <div key={i} className="stat"><span>{r[0]}</span><strong>{r[1]}</strong></div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {printSvg}
+      {diagPanel}
+    </div>
+  );
+}
