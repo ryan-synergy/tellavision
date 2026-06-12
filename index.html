@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="TV Planner">
+<meta name="apple-mobile-web-app-title" content="TellaVision">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="favicon.png">
 <meta name="theme-color" content="#141512">
-<title>TV Wall Planner — Synergy AV</title>
+<title>TellaVision — Synergy AV</title>
 <style>html, body, #root { height: 100%; margin: 0; background:#141512; }</style>
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
@@ -23,7 +23,7 @@ const { useState, useMemo, useRef, useEffect } = React;
 // ═══════════════════════════════════════════════════════════════════════════
 
 const TV_CATALOG = {
-  Sony: [42, 43, 48, 50, 55, 65, 75, 77, 85, 98, 100],
+  Sony: [42, 43, 48, 50, 55, 65, 75, 77, 85, 98, 100, 115],
   Samsung: [32, 43, 50, 55, 65, 75, 77, 83, 85, 98, 100, 115],
   LG: [42, 48, 55, 65, 77, 83, 97]
 };
@@ -174,6 +174,137 @@ const BACK_BOXES = {
     note: "Fits Samsung One Connect 8K"
   }
 };
+
+// SANUS Black Series (Legrand AV, doc SANBLK0919) — specs from the user's
+// catalog JSON. plateW/plateH from product dimensions (min of ranges);
+// vesaMax parsed W×H mm. depth = profile off wall; ext = full-motion reach.
+const SANUS_MOUNTS = {
+  "S-CILF230": {
+    model: "CILF230-G1",
+    name: "Large Full Motion",
+    style: "fullmotion",
+    tvMin: 46,
+    tvMax: 95,
+    capLbs: 175,
+    vesaMaxW: 600,
+    vesaMaxH: 400,
+    depth: 2.46,
+    ext: 30,
+    plateW: 36.73,
+    plateH: 22.03,
+    tilt: "+5/-15",
+    swivel: 55,
+    list: 499.99
+  },
+  "S-CILF226": {
+    model: "CILF226-B1",
+    name: "Large Full Motion",
+    style: "fullmotion",
+    tvMin: 37,
+    tvMax: 80,
+    capLbs: 135,
+    vesaMaxW: 600,
+    vesaMaxH: 400,
+    depth: 2.4,
+    ext: 26,
+    plateW: 27.59,
+    plateH: 19.55,
+    tilt: "+5/-15",
+    swivel: 49,
+    list: 299.99
+  },
+  "S-CILT2": {
+    model: "CILT2-B1",
+    name: "Large Advanced Tilt",
+    style: "tilt",
+    tvMin: 37,
+    tvMax: 90,
+    capLbs: 150,
+    vesaMaxW: 690,
+    vesaMaxH: 415,
+    depth: 2.75,
+    ext: 5.75,
+    plateW: 30,
+    plateH: 18.11,
+    tilt: "+7/-12",
+    swivel: null,
+    list: 279.99
+  },
+  "S-CILT1": {
+    model: "CILT1-B1",
+    name: "Large Tilting",
+    style: "tilt",
+    tvMin: 37,
+    tvMax: 95,
+    capLbs: 180,
+    vesaMaxW: 690,
+    vesaMaxH: 415,
+    depth: 2.2,
+    ext: null,
+    plateW: 30,
+    plateH: 17.53,
+    tilt: "+7/-10",
+    swivel: null,
+    list: 249.99
+  },
+  "S-CIXT1": {
+    model: "CIXT1-B1",
+    name: "Extra Large Tilting",
+    style: "tilt",
+    tvMin: 40,
+    tvMax: 110,
+    capLbs: 300,
+    vesaMaxW: 1100,
+    vesaMaxH: 800,
+    depth: 2.5,
+    ext: null,
+    plateW: 33.43,
+    plateH: 17.53,
+    tilt: "+7/-10",
+    swivel: null,
+    list: 299.99,
+    note: "Extender brackets included"
+  },
+  "S-CILL2": {
+    model: "CILL2-B1",
+    name: "Large Fixed",
+    style: "fixed",
+    tvMin: 37,
+    tvMax: 90,
+    capLbs: 150,
+    vesaMaxW: 825,
+    vesaMaxH: 500,
+    depth: 0.55,
+    ext: null,
+    plateW: 35.26,
+    plateH: 22.1,
+    tilt: null,
+    swivel: null,
+    list: 199.99
+  },
+  "S-CILL1": {
+    model: "CILL1-B1",
+    name: "Large Fixed",
+    style: "fixed",
+    tvMin: 37,
+    tvMax: 95,
+    capLbs: 180,
+    vesaMaxW: 690,
+    vesaMaxH: 415,
+    depth: 1.6,
+    ext: null,
+    plateW: 30,
+    plateH: 17.53,
+    tilt: null,
+    swivel: null,
+    list: 199.99
+  }
+};
+const SANUS_STYLE_ORDER = {
+  fixed: ["S-CILL1", "S-CILL2"],
+  tilt: ["S-CILT1", "S-CILT2", "S-CIXT1"],
+  fullmotion: ["S-CILF226", "S-CILF230"]
+};
 const VESA_DATA = {
   Sony: {
     42: {
@@ -317,11 +448,11 @@ const VESA_DATA = {
       voffset_pct: 0
     },
     115: {
-      w_mm: 800,
+      w_mm: 1000,
       h_mm: 600,
       screw: "M8",
       voffset_pct: 0,
-      note: "QN90F - confirm with spec sheet"
+      note: "Micro RGB - 1000x600 verified from spec sheet; screw depth 16-18mm; no Sanus Black mount this size"
     }
   },
   LG: {
@@ -394,11 +525,42 @@ const tvDims = size => ({
   w: size * 0.872 + 1.2,
   h: size * 0.490 + 1.2
 });
+
+// Exact panel data from manufacturer spec sheets (set WITHOUT stand).
+// When present these REPLACE the 16:9 formula in every calculation, and
+// weightLbs feeds the mount capacity check automatically.
+const TV_OVERRIDES = {
+  Samsung: {
+    115: {
+      w: 101.2,
+      h: 58.2,
+      d: 1.4,
+      weightLbs: 194.0,
+      model: '115" Micro RGB'
+    }
+  },
+  Sony: {
+    115: {
+      w: 101.0,
+      h: 57.75,
+      d: 2.5,
+      weightLbs: 235.3,
+      model: 'BRAVIA 9 II K115XR90M2 True RGB'
+    }
+  }
+};
+const tvDimsFor = (brand, size) => {
+  const o = TV_OVERRIDES[brand]?.[size];
+  return o ? {
+    w: o.w,
+    h: o.h
+  } : tvDims(size);
+};
 const mmToIn = mm => mm / 25.4;
-const recommendBackBox = (tvSize, mountType, brand) => {
+const recommendBackBox = (tvSize, mountSystem, brand) => {
   if (!tvSize) return null;
   const samsung8K = brand === "Samsung" && tvSize >= 65;
-  if (mountType === "articulating") {
+  if (mountSystem === "fa") {
     if (tvSize <= 43) return "FA-WB16-2S";
     if (tvSize <= 55) return "FA-WB21";
     if (tvSize <= 65) return "FA-WB26";
@@ -409,6 +571,34 @@ const recommendBackBox = (tvSize, mountType, brand) => {
   if (tvSize <= 55) return "SB-RBX-PRO-8";
   if (tvSize > 85) return "SB-RBX-PRO-XL";
   return "SB-RBX-PRO-14";
+};
+
+// Pick the Sanus Black mount for a TV size + style. Walks the style's
+// price-ordered ladder; prefers a model whose size AND VESA both fit, then
+// size-only (vesa flagged), then falls back to the XL tilt if nothing in
+// the style covers the size. Returns null when no catalog mount fits.
+const recommendSanusMount = (tvSize, style, brand) => {
+  if (!tvSize) return null;
+  const spec = VESA_DATA[brand]?.[tvSize] || null;
+  const vesaFits = m => !spec || spec.w_mm <= m.vesaMaxW && spec.h_mm <= m.vesaMaxH;
+  const sizeFits = m => tvSize >= m.tvMin && tvSize <= m.tvMax;
+  const order = SANUS_STYLE_ORDER[style] || SANUS_STYLE_ORDER.fixed;
+  let key = order.find(k => sizeFits(SANUS_MOUNTS[k]) && vesaFits(SANUS_MOUNTS[k]));
+  if (!key) key = order.find(k => sizeFits(SANUS_MOUNTS[k]));
+  let styleFallback = false;
+  if (!key && style !== "tilt" && sizeFits(SANUS_MOUNTS["S-CIXT1"])) {
+    key = "S-CIXT1";
+    styleFallback = true;
+  }
+  if (!key) return null;
+  const m = SANUS_MOUNTS[key];
+  return {
+    key,
+    ...m,
+    vesaOk: vesaFits(m),
+    sizeOk: sizeFits(m),
+    styleFallback
+  };
 };
 
 // --- display formatting (display-only; engine math stays full precision) ---
@@ -457,6 +647,7 @@ const computeTvCL = ({
 }) => wallW / 2 + (hasFireplace ? fbOffsetIn : 0) + tvOffsetIn;
 const computeRecommendedCenterH = ({
   selectedSize,
+  brand,
   hasFireplace,
   hasMantel,
   mantelH,
@@ -467,7 +658,7 @@ const computeRecommendedCenterH = ({
   if (!selectedSize) return 42;
   const {
     h: tvH
-  } = tvDims(selectedSize);
+  } = tvDimsFor(brand, selectedSize);
   if (hasFireplace && hasMantel) return mantelH + CLEARANCE.mantel + tvH / 2;
   if (hasFireplace && !hasMantel) return fbOpeningH + CLEARANCE.noMantel + tvH / 2;
   let base = 42;
@@ -479,20 +670,21 @@ const computeCenterH = ({
   mountHeightOverride,
   heightRef,
   recommendedCenterH,
-  selectedSize
+  selectedSize,
+  brand
 }) => {
   if (!mountHeightOverride) return recommendedCenterH;
   const val = parseFloat(mountHeightOverride);
   if (isNaN(val)) return recommendedCenterH;
-  if (heightRef === "bottom" && selectedSize) return val + tvDims(selectedSize).h / 2;
+  if (heightRef === "bottom" && selectedSize) return val + tvDimsFor(brand, selectedSize).h / 2;
   return val;
 };
 
 // Convert a height override between center- and bottom-reference, preserving
 // the physical TV position. Full precision; caller rounds for display.
-const convertOverride = (value, toRef, selectedSize) => {
+const convertOverride = (value, toRef, brand, selectedSize) => {
   if (!selectedSize || isNaN(value)) return null;
-  const half = tvDims(selectedSize).h / 2;
+  const half = tvDimsFor(brand, selectedSize).h / 2;
   return toRef === "bottom" ? value - half : value + half;
 };
 
@@ -506,13 +698,14 @@ const computeLayout = ({
   tvCL,
   showBackBox,
   effectiveBoxModel,
-  mountType
+  mountSystem,
+  sanusMount
 }) => {
   if (!selectedSize) return null;
   const {
     w: tvW,
     h: tvH
-  } = tvDims(selectedSize);
+  } = tvDimsFor(brand, selectedSize);
   const tvLeft = tvCL - tvW / 2;
   const tvRight = tvCL + tvW / 2;
   const tvTop = centerH + tvH / 2;
@@ -533,7 +726,7 @@ const computeLayout = ({
     const bb = BACK_BOXES[effectiveBoxModel];
     const anchorAFF = vesa ? vesa.aff : centerH;
     let cx;
-    if (mountType === "articulating" && bb.brand === "Future Automation") {
+    if (mountSystem === "fa" && bb.brand === "Future Automation") {
       cx = tvCL; // FA boxes sit behind the bracket, centered on VESA
     } else {
       const vesaHalfW = vesa ? vesa.w / 2 : 0;
@@ -545,11 +738,14 @@ const computeLayout = ({
     }
     const extendsOff = cx - bb.w / 2 < tvLeft || cx + bb.w / 2 > tvRight || anchorAFF + bb.h / 2 > tvTop || anchorAFF - bb.h / 2 < tvBottom;
     const underRated = selectedSize < bb.tvMin || selectedSize > bb.tvMax;
+    // btm matters in the field: with FA mounts the box location dictates
+    // where the TV lands, so installers set the box from its bottom edge.
     box = {
       ...bb,
       model: effectiveBoxModel,
       cx,
       aff: anchorAFF,
+      btm: anchorAFF - bb.h / 2,
       extendsOff,
       underRated
     };
@@ -579,6 +775,15 @@ const computeLayout = ({
       aff: y
     };
   }
+
+  // mount: FA bracket implied by the system; Sanus carries real plate
+  // dims, depth/profile, capacity, and fit flags
+  const mount = mountSystem === "fa" ? {
+    system: "fa"
+  } : sanusMount ? {
+    system: "sanus",
+    ...sanusMount
+  } : null;
   return {
     tvW,
     tvH,
@@ -591,6 +796,7 @@ const computeLayout = ({
     box,
     outlet,
     lv,
+    mount,
     centerH
   };
 };
@@ -598,6 +804,7 @@ const computeLayout = ({
 // Reasons a size fails the proportional/clearance guidelines (size cards +
 // warning panel). Empty array = recommended fit.
 const computeFitIssues = (sz, {
+  brand,
   wallW,
   wallH,
   hasFireplace,
@@ -608,7 +815,7 @@ const computeFitIssues = (sz, {
   const {
     w,
     h
-  } = tvDims(sz);
+  } = tvDimsFor(brand, sz);
   const maxByWall = wallW * 0.65;
   const minByWall = wallW * 0.35;
   const issues = [];
@@ -637,6 +844,7 @@ const computeRecommendations = ({
 }) => {
   const sizes = TV_CATALOG[brand];
   let candidates = sizes.filter(sz => computeFitIssues(sz, {
+    brand,
     wallW,
     wallH,
     hasFireplace,
@@ -677,17 +885,19 @@ const computePlacementIssues = ({
 };
 const buildPartsList = ({
   layout,
-  mountType,
   showOutlet,
   showLowVolt
 }) => {
   if (!layout) return [];
   const rows = [];
+  if (layout.mount?.system === "sanus") {
+    rows.push([`Mount`, `Sanus Black ${layout.mount.model} (${layout.mount.name})`]);
+  }
   if (layout.box) {
     rows.push([`Back box`, `${layout.box.brand} ${layout.box.label}`]);
-    rows.push([`Bracket`, `${layout.box.bracket} series (${mountType === "flat" ? "flat" : "articulating"})`]);
-  } else {
-    rows.push([`Mount`, mountType === "flat" ? "Low-profile flat mount" : "Articulating mount"]);
+    if (layout.mount?.system === "fa") rows.push([`Bracket`, `${layout.box.bracket} series (articulating)`]);
+  } else if (layout.mount?.system === "fa") {
+    rows.push([`Mount`, `Future Automation articulating bracket`]);
   }
   if (layout.vesa) rows.push([`VESA hardware`, `4× ${layout.vesa.spec.screw} screws (${layout.vesa.spec.w_mm}×${layout.vesa.spec.h_mm} pattern)`]);
   if (showOutlet) rows.push([`Power`, `1× recessed outlet kit`]);
@@ -696,11 +906,12 @@ const buildPartsList = ({
 };
 
 // --- persistence ---
-const STORAGE_KEY = "tv-wall-planner-v1"; // unchanged: legacy designs load
+const STORAGE_KEY = "tellavision-v1";
+const LEGACY_STORAGE_KEY = "tv-wall-planner-v1"; // pre-rename designs migrate on load
 const loadSaved = () => {
   try {
     if (typeof window === "undefined") return {};
-    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}") || {};
+    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEY) || "{}") || {};
   } catch {
     return {};
   }
@@ -713,7 +924,10 @@ const SAVED_SIZE = TV_CATALOG[SAVED_BRAND].includes(SAVED.selectedSize) ? SAVED.
 // Export carries both the editable design AND the computed numbers so
 // downstream apps can consume results without reimplementing the engine.
 const buildExportJSON = (design, layout) => ({
-  app: "tv-wall-planner",
+  app: "tellavision",
+  appName: "TellaVision",
+  legacyApp: "tv-wall-planner",
+  // imports accept either id
   schema: 1,
   exportedAt: new Date().toISOString(),
   design,
@@ -736,7 +950,17 @@ const buildExportJSON = (design, layout) => ({
       brand: layout.box.brand,
       bracket: layout.box.bracket,
       centerFromLeftIn: layout.box.cx,
-      centerAFFIn: layout.box.aff
+      centerAFFIn: layout.box.aff,
+      bottomAFFIn: layout.box.btm
+    } : null,
+    mount: layout.mount ? layout.mount.system === "fa" ? {
+      system: "fa"
+    } : {
+      system: "sanus",
+      model: layout.mount.model,
+      depthIn: layout.mount.depth,
+      extensionIn: layout.mount.ext,
+      capacityLbs: layout.mount.capLbs
     } : null,
     outlet: layout.outlet ? {
       fromLeftIn: layout.outlet.x,
@@ -753,7 +977,7 @@ const buildExportJSON = (design, layout) => ({
 // R12 ASCII DXF: the most universally importable CAD format. Geometry is at
 // TRUE SCALE in inches — origin at the left wall edge on the floor, Y up —
 // which is exactly the engine's coordinate system (X from left, AFF up).
-const DXF_LAYERS = [["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2], ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30], ["DIMENSIONS", 7], ["CENTERLINE", 1], ["NOTES", 7]];
+const DXF_LAYERS = [["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2], ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30], ["DIMENSIONS", 7], ["CENTERLINE", 1], ["TAPEOUT", 5], ["NOTES", 7]];
 const buildDXF = (S, layout) => {
   if (!layout) return null;
   const fmt = v => fmtIn(v, S.dispUnits);
@@ -879,8 +1103,8 @@ const buildDXF = (S, layout) => {
       rect("VESA", layout.tvCL - v.w / 2, v.aff - v.h / 2, v.w, v.h);
       [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sy]) => circle("VESA", layout.tvCL + sx * v.w / 2, v.aff + sy * v.h / 2, 0.25));
     }
-    const mw = layout.vesa.w + (S.mountType === "flat" ? 2 : 3);
-    const mh = S.mountType === "flat" ? 3.5 : layout.vesa.h + 2;
+    const mw = layout.mount?.system === "sanus" ? layout.mount.plateW : layout.vesa.w + (layout.mount?.system === "fa" ? 3 : 2);
+    const mh = layout.mount?.system === "sanus" ? layout.mount.plateH : layout.mount?.system === "fa" ? layout.vesa.h + 2 : 3.5;
     rect("MOUNT", layout.tvCL - mw / 2, layout.vesa.aff - mh / 2, mw, mh);
   }
 
@@ -926,6 +1150,18 @@ const buildDXF = (S, layout) => {
   line("DIMENSIONS", wallW + 5, wallH, wallW + 7, wallH);
   text("DIMENSIONS", wallW + 8, wallH / 2, 2.5, `${fmt(wallH)} H`);
 
+  // ---- tape-out lines (where the installer snaps tape on the real wall) ----
+  if (S.showTapeOut) {
+    line("TAPEOUT", 0, layout.tvTop, wallW, layout.tvTop);
+    line("TAPEOUT", 0, layout.tvBottom, wallW, layout.tvBottom);
+    line("TAPEOUT", layout.tvLeft, 0, layout.tvLeft, layout.tvTop);
+    line("TAPEOUT", layout.tvRight, 0, layout.tvRight, layout.tvTop);
+    text("TAPEOUT", 1, layout.tvTop + 0.8, 1.6, `TAPE TOP ${fmt(layout.tvTop)} AFF`);
+    text("TAPEOUT", 1, layout.tvBottom + 0.8, 1.6, `TAPE BTM ${fmt(layout.tvBottom)} AFF`);
+    text("TAPEOUT", layout.tvLeft + 0.8, 2, 1.6, `${fmt(layout.tvLeft)}`);
+    text("TAPEOUT", layout.tvRight + 0.8, 2, 1.6, `${fmt(layout.tvRight)}`);
+  }
+
   // ---- notes column (true data, right of the wall) ----
   const nx = wallW + 24;
   let ny = wallH - 2;
@@ -939,9 +1175,10 @@ const buildDXF = (S, layout) => {
   note(`TV CL: ${fmt(layout.tvCL)} FROM LEFT WALL EDGE`);
   if (layout.vesa) note(`VESA ${layout.vesa.spec.w_mm}x${layout.vesa.spec.h_mm} MM - ${layout.vesa.spec.screw} SCREWS`);
   if (layout.box) note(`BOX: ${layout.box.brand} ${layout.box.label} (${layout.box.w}x${layout.box.h}x${layout.box.d} IN)`);
+  if (S.showBoxDims && layout.box) note(`BOX BTM: ${fmt(layout.box.btm)} AFF (${fmt(Math.abs(layout.box.btm - layout.tvBottom))} ${layout.box.btm >= layout.tvBottom ? "ABV" : "BLW"} TV BTM)`);
   if (S.showOutlet) note(`PWR: ${fmt(layout.outlet.aff)} AFF, ${fmt(Math.abs(layout.outlet.x - layout.tvCL))} ${layout.outlet.x < layout.tvCL ? "LT" : "RT"} OF CL`);
   if (S.showLowVolt) note(`LV: ${fmt(layout.lv.aff)} AFF, ${fmt(Math.abs(layout.lv.x - layout.tvCL))} ${layout.lv.x < layout.tvCL ? "LT" : "RT"} OF CL`);
-  note(`MOUNT: ${S.mountType === "flat" ? "FLAT" : "ARTICULATING"}`);
+  note(`MOUNT: ${layout.mount ? layout.mount.system === "fa" ? "FUTURE AUTOMATION ARTICULATING" : `SANUS ${layout.mount.model} - DEPTH ${fmt(layout.mount.depth)}${layout.mount.ext ? ` / EXT ${fmt(layout.mount.ext)}` : ""}` : "TBD"}`);
 
   // ---- title block ----
   const title = [S.projectName, S.clientName].filter(Boolean).join(" - ");
@@ -968,7 +1205,7 @@ const extractImportedDesign = data => {
     out.notes.push("Not a JSON object");
     return out;
   }
-  if (data.app === "tv-wall-planner" && data.design && typeof data.design === "object") {
+  if ((data.app === "tellavision" || data.app === "tv-wall-planner") && data.design && typeof data.design === "object") {
     out.fields = {
       ...data.design
     };
@@ -1032,7 +1269,16 @@ const extractImportedDesign = data => {
       set("hasMantel", true);
       set("hasFireplace", true);
     } else if (/(mounttype|^mount$)/.test(k) && str) {
-      if (/artic|motion|swivel/i.test(str)) set("mountType", "articulating", "mount: articulating");else if (/flat|fixed|low.?profile/i.test(str)) set("mountType", "flat", "mount: flat");else out.ignored++;
+      if (/future.?automation|\bfa\b/i.test(str)) set("mountSystem", "fa", "mount: Future Automation");else if (/artic|motion|swivel/i.test(str)) {
+        set("mountSystem", "sanus", "mount: full motion");
+        set("sanusStyle", "fullmotion");
+      } else if (/tilt/i.test(str)) {
+        set("mountSystem", "sanus", "mount: tilt");
+        set("sanusStyle", "tilt");
+      } else if (/flat|fixed|low.?profile/i.test(str)) {
+        set("mountSystem", "sanus", "mount: fixed");
+        set("sanusStyle", "fixed");
+      } else out.ignored++;
     } else if (/(viewingdistance|viewdist|seatingdistance|distancetoseating)/.test(k) && num != null && num >= 36 && num <= 480) {
       set("viewDist", num, `viewing distance ${num}"`);
     } else if (/^(project|projectname|jobname|jobsite|address|site)$/.test(k) && str || (pk.includes("project") || pk.includes("job")) && /^name$/.test(k) && str) {
@@ -1076,7 +1322,8 @@ const runSelfTests = () => {
       tvCL: 60,
       showBackBox: true,
       effectiveBoxModel: "SB-RBX-PRO-14",
-      mountType: "flat"
+      mountSystem: "sanus",
+      sanusMount: null
     };
     const L = computeLayout(inp);
     T("golden", "A: TV 57.9 × 33.1", approx(L.tvW, 57.88) && approx(L.tvH, 33.05), `w=${L.tvW.toFixed(2)} h=${L.tvH.toFixed(2)}`);
@@ -1085,11 +1332,14 @@ const runSelfTests = () => {
     T("golden", "A: PWR 36.51\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 36.5085) && approx(L.outlet.x - L.tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)} dx=${(L.outlet.x - L.tvCL).toFixed(3)}`);
     T("golden", "A: LV 19.41\" right of CL", approx(L.lv.x - L.tvCL, 19.4055), `dx=${(L.lv.x - L.tvCL).toFixed(3)}`);
     T("golden", "A: box within TV, not flagged", !L.box.extendsOff && !L.box.underRated);
+    T("golden", "A: box bottom 34.01\" AFF, 8.53\" above TV bottom", approx(L.box.btm, 34.0085) && approx(L.box.btm - L.tvBottom, 8.5335), `btm=${L.box.btm.toFixed(3)} d=${(L.box.btm - L.tvBottom).toFixed(3)}`);
+    T("golden", "A: tape-out edges L 31.06 / R 88.94 / T 58.53 / B 25.48", approx(L.tvLeft, 31.06) && approx(L.tvRight, 88.94) && approx(L.tvTop, 58.525) && approx(L.tvBottom, 25.475), `L=${L.tvLeft.toFixed(2)} R=${L.tvRight.toFixed(2)} T=${L.tvTop.toFixed(2)} B=${L.tvBottom.toFixed(2)}`);
   }
   // ---- Golden case B: "Smith Residence" — fireplace +15", mantel 54", bottom override 53.5 ----
   {
     const recommended = computeRecommendedCenterH({
       selectedSize: 65,
+      brand: "Sony",
       hasFireplace: true,
       hasMantel: true,
       mantelH: 54,
@@ -1102,7 +1352,8 @@ const runSelfTests = () => {
       mountHeightOverride: "53.5",
       heightRef: "bottom",
       recommendedCenterH: recommended,
-      selectedSize: 65
+      selectedSize: 65,
+      brand: "Sony"
     });
     T("golden", "B: override 53.5 bottom → center 70.03", approx(centerH, 70.025), `center=${centerH.toFixed(3)}`);
     const tvCL = computeTvCL({
@@ -1119,7 +1370,8 @@ const runSelfTests = () => {
       tvCL,
       showBackBox: true,
       effectiveBoxModel: "SB-RBX-PRO-14",
-      mountType: "flat"
+      mountSystem: "sanus",
+      sanusMount: null
     });
     T("golden", "B: PWR 64.53\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 64.5335) && approx(L.outlet.x - tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)}`);
   }
@@ -1132,14 +1384,15 @@ const runSelfTests = () => {
       tvCL: 60,
       showBackBox: true,
       effectiveBoxModel: "SB-RBX-PRO-8",
-      mountType: "flat"
+      mountSystem: "sanus",
+      sanusMount: null
     });
     T("golden", "C: LG 55 VESA center 39.19\" AFF (−10%)", approx(L.vesa.aff, 39.185), `aff=${L.vesa.aff.toFixed(3)}`);
     T("golden", "C: outlet 37.69\" AFF in 8\"-tall box", approx(L.outlet.aff, 37.685), `aff=${L.outlet.aff.toFixed(3)}`);
   }
   // ---- Golden: back-box selector branches ----
-  T("golden", "Samsung 85 flat → Pro XL (One Connect)", recommendBackBox(85, "flat", "Samsung") === "SB-RBX-PRO-XL");
-  T("golden", "Sony 98 flat → Pro XL (>85 rule)", recommendBackBox(98, "flat", "Sony") === "SB-RBX-PRO-XL");
+  T("golden", "Samsung 85 Sanus → Pro XL (One Connect)", recommendBackBox(85, "sanus", "Samsung") === "SB-RBX-PRO-XL");
+  T("golden", "Sony 98 Sanus → Pro XL (>85 rule)", recommendBackBox(98, "sanus", "Sony") === "SB-RBX-PRO-XL");
   T("golden", "Sony 100 articulating → WB80, flagged under-rated", (() => {
     const L = computeLayout({
       selectedSize: 100,
@@ -1147,11 +1400,58 @@ const runSelfTests = () => {
       centerH: 50,
       tvCL: 60,
       showBackBox: true,
-      effectiveBoxModel: recommendBackBox(100, "articulating", "Sony"),
-      mountType: "articulating"
+      effectiveBoxModel: recommendBackBox(100, "fa", "Sony"),
+      mountSystem: "fa",
+      sanusMount: null
     });
     return L.box.model === "FA-WB80" && L.box.underRated;
   })());
+  // ---- Golden: spec-sheet panel overrides (115" RGB class) ----
+  T("golden", "Samsung 115 Micro RGB exact dims 101.2 × 58.2", (() => {
+    const d = tvDimsFor("Samsung", 115);
+    return d.w === 101.2 && d.h === 58.2;
+  })());
+  T("golden", "Sony 115 BRAVIA 9 II exact dims 101.0 × 57.75, 235.3 lbs", (() => {
+    const d = tvDimsFor("Sony", 115);
+    return d.w === 101.0 && d.h === 57.75 && TV_OVERRIDES.Sony[115].weightLbs === 235.3;
+  })());
+  T("golden", "Samsung 115 VESA corrected to 1000×600 M8", VESA_DATA.Samsung[115].w_mm === 1000 && VESA_DATA.Samsung[115].h_mm === 600 && VESA_DATA.Samsung[115].screw === "M8");
+  T("golden", "Sony 115 has NO VESA entry (spec sheet lacks it — never guess)", !VESA_DATA.Sony[115]);
+  T("golden", "Layout uses exact dims: Samsung 115 @ center 50 → top 79.1", (() => {
+    const L = computeLayout({
+      selectedSize: 115,
+      brand: "Samsung",
+      centerH: 50,
+      tvCL: 75,
+      showBackBox: true,
+      effectiveBoxModel: "SB-RBX-PRO-XL",
+      mountSystem: "sanus",
+      sanusMount: null
+    });
+    return approx(L.tvTop, 50 + 29.1) && approx(L.tvW, 101.2);
+  })());
+  T("invariant", "Every TV_OVERRIDES entry exists in the catalog", (() => Object.entries(TV_OVERRIDES).every(([b, sizes]) => Object.keys(sizes).every(sz => TV_CATALOG[b]?.includes(+sz))))());
+
+  // ---- Golden: Sanus Black mount selection ----
+  T("golden", "Sony 65 fixed → CILL1-B1", recommendSanusMount(65, "fixed", "Sony")?.model === "CILL1-B1");
+  T("golden", "Samsung 85 full motion → CILF230-G1", recommendSanusMount(85, "fullmotion", "Samsung")?.model === "CILF230-G1");
+  T("golden", "LG 97 fixed → falls back to CIXT1-B1 (XL tilt)", (() => {
+    const m = recommendSanusMount(97, "fixed", "LG");
+    return m?.model === "CIXT1-B1" && m.styleFallback === true;
+  })());
+  T("golden", "Samsung 115 → no Sanus Black mount (catalog max 110)", recommendSanusMount(115, "tilt", "Samsung") === null);
+  T("golden", "Samsung 32 → no Sanus Black mount (catalog min 37)", recommendSanusMount(32, "fixed", "Samsung") === null);
+  T("invariant", "Sanus selector: every pick fits size; null only outside 37–110", (() => {
+    let ok = true;
+    BRANDS.forEach(b => TV_CATALOG[b].forEach(sz => ["fixed", "tilt", "fullmotion"].forEach(st => {
+      const m = recommendSanusMount(sz, st, b);
+      if (m === null) {
+        if (sz >= 37 && sz <= 110) ok = false;
+      } else if (sz < m.tvMin || sz > m.tvMax) ok = false;
+    })));
+    return ok;
+  })());
+
   // ---- Golden: recommendations (120×108 wall, Sony, 144" viewing) ----
   {
     const rec = computeRecommendations({
@@ -1210,13 +1510,23 @@ const runSelfTests = () => {
     });
     return ex.fields.brand === "Samsung" && ex.fields.selectedSize === 75;
   })());
-  T("interop", "Native export round-trips", (() => {
+  T("interop", "Native export round-trips (new id)", (() => {
     const ex = extractImportedDesign(buildExportJSON({
       wallW: 96,
       brand: "LG",
       selectedSize: 77
     }, null));
     return ex.native === true && ex.fields.wallW === 96 && ex.fields.brand === "LG" && ex.fields.selectedSize === 77;
+  })());
+  T("interop", "Legacy tv-wall-planner exports still import", (() => {
+    const ex = extractImportedDesign({
+      app: "tv-wall-planner",
+      design: {
+        brand: "Sony",
+        selectedSize: 65
+      }
+    });
+    return ex.native === true && ex.fields.selectedSize === 65;
   })());
   T("interop", "Irrelevant JSON tolerated, nothing matched", (() => {
     const ex = extractImportedDesign({
@@ -1240,7 +1550,8 @@ const runSelfTests = () => {
       tvCL: 60,
       showBackBox: true,
       effectiveBoxModel: "SB-RBX-PRO-14",
-      mountType: "flat"
+      mountSystem: "sanus",
+      sanusMount: recommendSanusMount(65, "fixed", "Sony")
     });
     const dxfState = {
       wallW: 120,
@@ -1255,7 +1566,6 @@ const runSelfTests = () => {
       brand: "Sony",
       selectedSize: 65,
       dispUnits: "dec",
-      mountType: "flat",
       showVesa: true,
       showOutlet: true,
       showLowVolt: true,
@@ -1301,11 +1611,11 @@ const runSelfTests = () => {
   const detail = [];
   BRANDS.forEach(brand => {
     TV_CATALOG[brand].forEach(sz => {
-      ["flat", "articulating"].forEach(mountType => {
-        const boxModel = recommendBackBox(sz, mountType, brand);
+      ["sanus", "fa"].forEach(mountSystem => {
+        const boxModel = recommendBackBox(sz, mountSystem, brand);
         if (!BACK_BOXES[boxModel]) {
           boxKeyOK = false;
-          detail.push(`no box: ${brand} ${sz} ${mountType}`);
+          detail.push(`no box: ${brand} ${sz} ${mountSystem}`);
         }
         const L = computeLayout({
           selectedSize: sz,
@@ -1314,7 +1624,8 @@ const runSelfTests = () => {
           tvCL: 60,
           showBackBox: true,
           effectiveBoxModel: boxModel,
-          mountType
+          mountSystem,
+          sanusMount: mountSystem === "sanus" ? recommendSanusMount(sz, "fixed", brand) : null
         });
         sweepCount++;
         // geometry symmetry + height identities
@@ -1335,18 +1646,18 @@ const runSelfTests = () => {
           const out = L.box.cx - L.box.w / 2 < L.tvLeft || L.box.cx + L.box.w / 2 > L.tvRight || L.box.aff + L.box.h / 2 > L.tvTop || L.box.aff - L.box.h / 2 < L.tvBottom;
           if (out !== L.box.extendsOff) {
             boxHonest = false;
-            detail.push(`box flag: ${brand} ${sz} ${mountType}`);
+            detail.push(`box flag: ${brand} ${sz} ${mountSystem}`);
           }
           // electrical inside box
           const inBox = p => p.x >= L.box.cx - L.box.w / 2 - 1e-9 && p.x <= L.box.cx + L.box.w / 2 + 1e-9 && p.aff >= L.box.aff - L.box.h / 2 - 1e-9 && p.aff <= L.box.aff + L.box.h / 2 + 1e-9;
           if (!inBox(L.outlet) || !inBox(L.lv)) {
             elecOK = false;
-            detail.push(`elec: ${brand} ${sz} ${mountType}`);
+            detail.push(`elec: ${brand} ${sz} ${mountSystem}`);
           }
         }
         // override conversion round-trip
-        const there = convertOverride(50, "bottom", sz);
-        const back = convertOverride(there, "center", sz);
+        const there = convertOverride(50, "bottom", brand, sz);
+        const back = convertOverride(there, "center", brand, sz);
         if (!approx(back, 50, 1e-9)) {
           convOK = false;
           detail.push(`conv: ${sz}`);
@@ -1365,11 +1676,12 @@ const runSelfTests = () => {
         rec.forEach(rsz => {
           const rc = computeRecommendedCenterH({
             selectedSize: rsz,
+            brand,
             useViewDist: false,
             viewDist: 144,
             ...cfg
           });
-          const top = rc + tvDims(rsz).h / 2;
+          const top = rc + tvDimsFor(brand, rsz).h / 2;
           if (top > 108 + 1e-9) {
             recFitsOK = false;
             detail.push(`rec-fit: ${brand} ${rsz} ${cfg.name} top=${top.toFixed(1)}`);
@@ -1452,6 +1764,7 @@ const SCREEN_PALETTE = {
   mount: "#8DA3B8",
   pillStyle: "filled",
   pillText: "#06121F",
+  tape: "#5EEAD4",
   title: "#8DA3B8"
 };
 const PRINT_PALETTE = {
@@ -1482,6 +1795,7 @@ const PRINT_PALETTE = {
   pillStyle: "outline",
   pillText: null,
   // outline pills use the accent color for text
+  tape: "#0E7C90",
   title: "#5C7186"
 };
 
@@ -1533,6 +1847,11 @@ const buildSchematic = (S, P) => {
     showVesa,
     showOutlet,
     showLowVolt,
+    showBoxDims,
+    showTvDims,
+    showTapeOut,
+    showTravel,
+    travelIn,
     projectName,
     clientName,
     revision,
@@ -1579,7 +1898,69 @@ const buildSchematic = (S, P) => {
   }
   const rightPad = hDimRelX - safeWallW * scale + 24 + textW(`${safeWallH}" H`, 13) + 12;
   const hasTitleBlock = !!(projectName || clientName);
-  const bottomPad = basePad + 26 + (hasTitleBlock ? 16 : 0);
+  const tbDate = new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+  const titleStr = hasTitleBlock ? `${[projectName, clientName].filter(Boolean).join("  •  ").toUpperCase()}  •  REV ${revision || "01"}  •  ${tbDate}` : "";
+  const ntsStr = "NOT TO SCALE — DIMENSIONS GOVERN";
+  // The leader rail can outrun a small-scale wall (anchors near the floor
+  // drag pills down). Simulate the exact packing in wall-relative space —
+  // pad-independent — and reserve the real overflow in bottomPad.
+  let railBottomRel = 0;
+  if (layout) {
+    const wallPxHRel = safeWallH * scale;
+    const relY = aff => wallPxHRel - aff * scale;
+    const ents = [];
+    if (layout.vesa && showVesa) ents.push({
+      a: relY(layout.vesa.aff + layout.vesa.h / 2),
+      n: 2
+    });
+    if (layout.box) ents.push({
+      a: relY(layout.box.aff),
+      n: 2 + (layout.box.extendsOff ? 1 : 0) + (showBoxDims ? 2 + (hasFireplace && hasMantel ? 1 : 0) : 0)
+    });
+    if (showOutlet) ents.push({
+      a: relY(layout.outlet.aff),
+      n: 2
+    });
+    if (showLowVolt) ents.push({
+      a: relY(layout.lv.aff),
+      n: 2
+    });
+    if (showTapeOut) ents.push({
+      a: relY(layout.tvTop),
+      n: 2
+    });
+    if (layout.mount?.system === "sanus") ents.push({
+      a: relY(layout.vesa ? layout.vesa.aff : layout.centerH),
+      n: 2
+    });
+    if (showTravel && S.mountSystem === "fa" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0) ents.push({
+      a: relY(layout.tvTop + travelIn),
+      n: 2
+    });
+    const relTvTop = relY(layout.tvTop);
+    const topFloor = showTvDims ? relTvTop + 2 - 12 : 10;
+    let prevTop = -Infinity,
+      prevH = 0;
+    ents.map((e, i) => ({
+      ...e,
+      _i: i
+    })).sort((x, y) => x.a - y.a || x._i - y._i).forEach(e => {
+      const h = 16 + (e.n - 1) * 13;
+      const top = Math.max(e.a - 16, prevTop + prevH + 8, topFloor);
+      railBottomRel = top + h;
+      prevTop = top;
+      prevH = h;
+    });
+  }
+  // wall width + side pads are already fixed here, so the bottom-row fit
+  // check is exact: stack title and NTS when one row can't hold both
+  const svgWForRow = safeWallW * scale + leftPad + (layout ? Math.max(basePad, 88) : Math.max(basePad, 88));
+  const twoLineBottom = hasTitleBlock && textW(titleStr, 9) + textW(ntsStr, 9) + 48 > svgWForRow;
+  const bottomPad = Math.max(basePad + 26 + (hasTitleBlock ? twoLineBottom ? 30 : 16 : 0), railBottomRel - safeWallH * scale + 30 + (hasTitleBlock ? twoLineBottom ? 30 : 16 : 0));
   const wallX = leftPad;
   const wallY = topPad;
   const wallPxW = safeWallW * scale;
@@ -1751,8 +2132,8 @@ const buildSchematic = (S, P) => {
       vesaPxW = layout.vesa.w * scale;
       vesaPxH = layout.vesa.h * scale;
       vesaCenterY = floorY - layout.vesa.aff * scale;
-      const mountPxW = vesaPxW + (S.mountType === "flat" ? 2 : 3) * scale;
-      const mountPxH = S.mountType === "flat" ? 3.5 * scale : vesaPxH + 2 * scale;
+      const mountPxW = (layout.mount?.system === "sanus" ? layout.mount.plateW : layout.vesa.w + (layout.mount?.system === "fa" ? 3 : 2)) * scale;
+      const mountPxH = (layout.mount?.system === "sanus" ? layout.mount.plateH : layout.mount?.system === "fa" ? layout.vesa.h + 2 : 3.5) * scale;
       elements.push(/*#__PURE__*/React.createElement("rect", {
         key: K("mount"),
         x: vesaCenterX - mountPxW / 2,
@@ -1790,6 +2171,18 @@ const buildSchematic = (S, P) => {
         strokeWidth: "1.8",
         strokeDasharray: "8 4"
       }));
+      if (showBoxDims) {
+        // emphasized bottom edge — the FA set line in the field
+        elements.push(/*#__PURE__*/React.createElement("line", {
+          key: K("bb-btm"),
+          x1: bbX - 6,
+          y1: bbY + bbPxH,
+          x2: bbX + bbPxW + 6,
+          y2: bbY + bbPxH,
+          stroke: c,
+          strokeWidth: "2"
+        }));
+      }
     }
     if (showVesa && layout.vesa) {
       const vLeft = vesaCenterX - vesaPxW / 2;
@@ -1873,6 +2266,21 @@ const buildSchematic = (S, P) => {
         text: "! EXTENDS BEYOND TV",
         size: 8
       });
+      if (showBoxDims) {
+        lines.push({
+          text: `BOX BTM ${fmt(layout.box.btm)} AFF`,
+          size: 9
+        });
+        const d = layout.box.btm - layout.tvBottom;
+        lines.push({
+          text: `${fmt(Math.abs(d))} ${d >= 0 ? "ABV" : "BLW"} TV BTM`,
+          size: 9
+        });
+        if (hasFireplace && hasMantel) lines.push({
+          text: `${fmt(layout.box.btm - mantelH)} ABV MANTEL`,
+          size: 9
+        });
+      }
       rail.push({
         id: "bb",
         color: c,
@@ -1959,8 +2367,103 @@ const buildSchematic = (S, P) => {
         }]
       });
     }
+    if (showTapeOut) {
+      rail.push({
+        id: "tape",
+        color: P.tape,
+        anchor: [tvX + tvPxW - 4, floorY - layout.tvTop * scale],
+        anchorY: floorY - layout.tvTop * scale,
+        lines: [{
+          text: "TAPE-OUT",
+          size: 10
+        }, {
+          text: "VERTICALS FROM LEFT WALL",
+          size: 8
+        }]
+      });
+    }
+    if (layout.mount?.system === "sanus") {
+      rail.push({
+        id: "mnt",
+        color: P.mount,
+        anchor: [vesaCenterX + layout.mount.plateW / 2 * scale, vesaCenterY],
+        anchorY: vesaCenterY,
+        lines: [{
+          text: `SANUS ${layout.mount.model}`,
+          size: 10
+        }, {
+          text: `DEPTH ${fmt(layout.mount.depth)}${layout.mount.ext ? ` · EXT ${fmt(layout.mount.ext)}` : ""}`,
+          size: 9
+        }]
+      });
+    }
+    if (showTravel && S.mountSystem === "fa" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0) {
+      const t = travelIn * scale;
+      const yT = tvY - t,
+        yB = tvY + tvPxH + t;
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("tr-top"),
+        x1: tvX + 4,
+        y1: yT,
+        x2: tvX + tvPxW - 4,
+        y2: yT,
+        stroke: P.lineSoft,
+        strokeWidth: "1",
+        strokeDasharray: "4 4",
+        opacity: "0.8"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("tr-btm"),
+        x1: tvX + 4,
+        y1: yB,
+        x2: tvX + tvPxW - 4,
+        y2: yB,
+        stroke: P.lineSoft,
+        strokeWidth: "1",
+        strokeDasharray: "4 4",
+        opacity: "0.8"
+      }));
+      const ax = tvX + 14;
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("tr-ar"),
+        x1: ax,
+        y1: yT,
+        x2: ax,
+        y2: yB,
+        stroke: P.lineSoft,
+        strokeWidth: "1",
+        opacity: "0.9"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("path", {
+        key: K("tr-a1"),
+        d: `M${ax - 3} ${yT + 6} L${ax} ${yT} L${ax + 3} ${yT + 6}`,
+        stroke: P.lineSoft,
+        fill: "none",
+        strokeWidth: "1"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("path", {
+        key: K("tr-a2"),
+        d: `M${ax - 3} ${yB - 6} L${ax} ${yB} L${ax + 3} ${yB - 6}`,
+        stroke: P.lineSoft,
+        fill: "none",
+        strokeWidth: "1"
+      }));
+      rail.push({
+        id: "travel",
+        color: P.lineSoft,
+        anchor: [tvX + tvPxW - 4, yT],
+        anchorY: yT,
+        lines: [{
+          text: `TV ADJUST ±${fmt(travelIn)}`,
+          size: 10
+        }, {
+          text: "FA BRACKET — VERIFY SPEC",
+          size: 8
+        }]
+      });
+    }
     const railX = tvX + tvPxW + 16;
-    packRail(rail, wallY + 10).forEach(e => {
+    packRail(rail, showTvDims ? tvY + 2 : wallY + 10).forEach(e => {
       elements.push(/*#__PURE__*/React.createElement("line", {
         key: K(`${e.id}-leader`),
         x1: e.anchor[0],
@@ -2059,56 +2562,58 @@ const buildSchematic = (S, P) => {
 
     // width (top, lane 0)
     const dimY = tvY - 18;
-    const wTxt = `${fmt(tvW)} W`;
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("dw"),
-      x1: tvX,
-      y1: dimY,
-      x2: tvX + tvPxW,
-      y2: dimY,
-      stroke: P.line,
-      strokeWidth: "1"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("dwa"),
-      x1: tvX,
-      y1: dimY - 4,
-      x2: tvX,
-      y2: dimY + 4,
-      stroke: P.line,
-      strokeWidth: "1"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("dwb"),
-      x1: tvX + tvPxW,
-      y1: dimY - 4,
-      x2: tvX + tvPxW,
-      y2: dimY + 4,
-      stroke: P.line,
-      strokeWidth: "1"
-    }));
-    const dwMidX = tvX + tvPxW / 2;
-    const dwW = textW(wTxt, 13) + 8;
-    elements.push(/*#__PURE__*/React.createElement("rect", {
-      key: K("dwbg"),
-      x: dwMidX - dwW / 2,
-      y: dimY - 18,
-      width: dwW,
-      height: 16,
-      fill: P.halo,
-      stroke: "none",
-      rx: "2"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("text", {
-      key: K("dwt"),
-      x: dwMidX,
-      y: dimY - 6,
-      textAnchor: "middle",
-      fill: P.dimText,
-      fontSize: "13",
-      fontWeight: "600",
-      fontFamily: "'IBM Plex Mono', monospace"
-    }, wTxt));
+    if (showTvDims) {
+      const wTxt = `${fmt(tvW)} W × ${fmt(tvH)} H`;
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("dw"),
+        x1: tvX,
+        y1: dimY,
+        x2: tvX + tvPxW,
+        y2: dimY,
+        stroke: P.line,
+        strokeWidth: "1"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("dwa"),
+        x1: tvX,
+        y1: dimY - 4,
+        x2: tvX,
+        y2: dimY + 4,
+        stroke: P.line,
+        strokeWidth: "1"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("dwb"),
+        x1: tvX + tvPxW,
+        y1: dimY - 4,
+        x2: tvX + tvPxW,
+        y2: dimY + 4,
+        stroke: P.line,
+        strokeWidth: "1"
+      }));
+      const dwMidX = tvX + tvPxW / 2;
+      const dwW = textW(wTxt, 13) + 8;
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("dwbg"),
+        x: dwMidX - dwW / 2,
+        y: dimY - 18,
+        width: dwW,
+        height: 16,
+        fill: P.halo,
+        stroke: "none",
+        rx: "2"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("text", {
+        key: K("dwt"),
+        x: dwMidX,
+        y: dimY - 6,
+        textAnchor: "middle",
+        fill: P.dimText,
+        fontSize: "13",
+        fontWeight: "600",
+        fontFamily: "'IBM Plex Mono', monospace"
+      }, wTxt));
+    }
 
     // centerline (top, lane 1 — steps above the width dim when crowded) +
     // dash-dot CL through the wall, stopping short of the width dimension lane
@@ -2175,6 +2680,79 @@ const buildSchematic = (S, P) => {
       fontFamily: "'IBM Plex Mono', monospace",
       letterSpacing: "0.5"
     }, clTxt));
+
+    // tape-out mode: the four lines an installer actually snaps on the wall
+    if (showTapeOut) {
+      const tTop = floorY - layout.tvTop * scale;
+      const tBtm = floorY - layout.tvBottom * scale;
+      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} AFF`], ["t-btm", tBtm, `BTM ${fmt(layout.tvBottom)} AFF`]].forEach(([id, y, txt]) => {
+        elements.push(/*#__PURE__*/React.createElement("line", {
+          key: K(id),
+          x1: wallX + 2,
+          y1: y,
+          x2: wallX + wallPxW - 2,
+          y2: y,
+          stroke: P.tape,
+          strokeWidth: "1.2",
+          strokeDasharray: "10 5",
+          opacity: "0.95"
+        }));
+        const w = textW(txt, 10) + 10;
+        elements.push(/*#__PURE__*/React.createElement("rect", {
+          key: K(`${id}-bg`),
+          x: wallX + 6,
+          y: y - 14,
+          width: w,
+          height: 13,
+          fill: P.halo,
+          rx: "2"
+        }));
+        elements.push(/*#__PURE__*/React.createElement("text", {
+          key: K(`${id}-t`),
+          x: wallX + 11,
+          y: y - 4,
+          fill: P.tape,
+          fontSize: "10",
+          fontWeight: "700",
+          fontFamily: "'IBM Plex Mono', monospace"
+        }, txt));
+      });
+      [["t-l", layout.tvLeft], ["t-r", layout.tvRight]].forEach(([id, v]) => {
+        const x = wallX + v * scale;
+        elements.push(/*#__PURE__*/React.createElement("line", {
+          key: K(id),
+          x1: x,
+          y1: tTop,
+          x2: x,
+          y2: floorY - 2,
+          stroke: P.tape,
+          strokeWidth: "1.2",
+          strokeDasharray: "10 5",
+          opacity: "0.95"
+        }));
+        const txt = fmt(v);
+        const w = textW(txt, 10) + 10;
+        elements.push(/*#__PURE__*/React.createElement("rect", {
+          key: K(`${id}-bg`),
+          x: x - w / 2,
+          y: floorY - 24,
+          width: w,
+          height: 13,
+          fill: P.halo,
+          rx: "2"
+        }));
+        elements.push(/*#__PURE__*/React.createElement("text", {
+          key: K(`${id}-t`),
+          x: x,
+          y: floorY - 14,
+          textAnchor: "middle",
+          fill: P.tape,
+          fontSize: "10",
+          fontWeight: "700",
+          fontFamily: "'IBM Plex Mono', monospace"
+        }, txt));
+      });
+    }
   }
 
   // wall width (bottom)
@@ -2256,25 +2834,19 @@ const buildSchematic = (S, P) => {
     fontFamily: "'IBM Plex Mono', monospace"
   }, fmtIn(safeWallH, dispUnits), " H"));
 
-  // title block + NTS note
+  // title block + NTS note — stacked on two rows when one can't hold both
   const tbY = svgH - 10;
   if (hasTitleBlock) {
-    const tbText = [projectName, clientName].filter(Boolean).join("  •  ");
-    const tbDate = new Date().toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
     elements.push(/*#__PURE__*/React.createElement("text", {
       key: K("tb"),
       x: 16,
-      y: tbY,
+      y: twoLineBottom ? tbY - 14 : tbY,
       textAnchor: "start",
       fill: P.title,
       fontSize: "9",
       fontFamily: "'IBM Plex Mono', monospace",
       letterSpacing: "1"
-    }, tbText.toUpperCase(), "  \u2022  REV ", revision || "01", "  \u2022  ", tbDate));
+    }, titleStr));
   }
   elements.push(/*#__PURE__*/React.createElement("text", {
     key: K("nts"),
@@ -2285,7 +2857,7 @@ const buildSchematic = (S, P) => {
     fontSize: "9",
     fontFamily: "'IBM Plex Mono', monospace",
     letterSpacing: "1"
-  }, "NOT TO SCALE \u2014 DIMENSIONS GOVERN"));
+  }, ntsStr));
   return {
     elements,
     svgW,
@@ -2311,6 +2883,11 @@ const sweepConfigs = () => {
     showVesa: true,
     showOutlet: true,
     showLowVolt: true,
+    showBoxDims: true,
+    showTvDims: true,
+    showTapeOut: false,
+    showTravel: true,
+    travelIn: 1.5,
     projectName: "Sweep",
     clientName: "QA",
     revision: "01",
@@ -2326,7 +2903,8 @@ const sweepConfigs = () => {
       name: `${brand} ${sz} flat/dec/open`,
       brand,
       selectedSize: sz,
-      mountType: "flat",
+      mountSystem: "sanus",
+      sanusStyle: "fixed",
       dispUnits: "dec",
       hasFireplace: false
     });
@@ -2335,7 +2913,7 @@ const sweepConfigs = () => {
       name: `${brand} ${sz} artic/ftin/fp`,
       brand,
       selectedSize: sz,
-      mountType: "articulating",
+      mountSystem: "fa",
       dispUnits: "ftin",
       hasFireplace: true,
       heightRef: "bottom"
@@ -2350,17 +2928,19 @@ const sweepConfigs = () => {
       name: `${brand} ${big} high mount`,
       brand,
       selectedSize: big,
-      mountType: "flat",
+      mountSystem: "sanus",
+      sanusStyle: "fixed",
       dispUnits: "ftin",
       hasFireplace: false,
-      override: String(108 - tvDims(big).h / 2 - 1)
+      override: String(108 - tvDimsFor(brand, big).h / 2 - 1)
     });
     cfgs.push({
       ...base,
       name: `${brand} ${small} low mount`,
       brand,
       selectedSize: small,
-      mountType: "flat",
+      mountSystem: "sanus",
+      sanusStyle: "fixed",
       dispUnits: "dec",
       hasFireplace: false,
       heightRef: "bottom",
@@ -2371,7 +2951,8 @@ const sweepConfigs = () => {
       name: `${brand} ${small} mobile/frac/fp`,
       brand,
       selectedSize: small,
-      mountType: "flat",
+      mountSystem: "sanus",
+      sanusStyle: "fixed",
       dispUnits: "frac",
       hasFireplace: true,
       isMobile: true,
@@ -2383,7 +2964,8 @@ const sweepConfigs = () => {
     name: "offsets fb+20 tv−15 ftin",
     brand: "Sony",
     selectedSize: 65,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "ftin",
     hasFireplace: true,
     fbOffsetIn: 20,
@@ -2396,7 +2978,8 @@ const sweepConfigs = () => {
     selectedSize: 43,
     wallW: 84,
     wallH: 84,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "ftin",
     hasFireplace: false
   });
@@ -2407,7 +2990,7 @@ const sweepConfigs = () => {
     selectedSize: 48,
     wallW: 70,
     wallH: 96,
-    mountType: "articulating",
+    mountSystem: "fa",
     dispUnits: "frac",
     hasFireplace: false,
     isMobile: true,
@@ -2421,7 +3004,8 @@ const sweepConfigs = () => {
     selectedSize: 115,
     wallW: 300,
     wallH: 140,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "ftin",
     hasFireplace: false
   });
@@ -2432,7 +3016,8 @@ const sweepConfigs = () => {
     selectedSize: 42,
     wallW: 300,
     wallH: 140,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "ftin",
     hasFireplace: false,
     heightRef: "bottom"
@@ -2444,7 +3029,7 @@ const sweepConfigs = () => {
     selectedSize: 32,
     wallW: 60,
     wallH: 72,
-    mountType: "articulating",
+    mountSystem: "fa",
     dispUnits: "ftin",
     hasFireplace: false,
     heightRef: "bottom"
@@ -2454,7 +3039,8 @@ const sweepConfigs = () => {
     name: "TV hard left",
     brand: "Sony",
     selectedSize: 55,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "ftin",
     hasFireplace: false,
     tvOffsetIn: -33
@@ -2464,7 +3050,8 @@ const sweepConfigs = () => {
     name: "TV hard right",
     brand: "Sony",
     selectedSize: 55,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "ftin",
     hasFireplace: false,
     tvOffsetIn: 33,
@@ -2475,7 +3062,7 @@ const sweepConfigs = () => {
     name: "wide TV near top + ftin + fp",
     brand: "Samsung",
     selectedSize: 98,
-    mountType: "articulating",
+    mountSystem: "fa",
     dispUnits: "ftin",
     hasFireplace: true,
     override: String(108 - tvDims(98).h / 2 - 0.5)
@@ -2487,9 +3074,116 @@ const sweepConfigs = () => {
     selectedSize: 97,
     wallW: 280,
     wallH: 130,
-    mountType: "flat",
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
     dispUnits: "frac",
     hasFireplace: false,
+    isMobile: true,
+    viewportW: 375
+  });
+  // tape-out mode at the extremes
+  cfgs.push({
+    ...base,
+    name: "tape-out open wall ftin",
+    brand: "Sony",
+    selectedSize: 65,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    showTapeOut: true
+  });
+  cfgs.push({
+    ...base,
+    name: "tape-out small TV mobile",
+    brand: "Samsung",
+    selectedSize: 32,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "frac",
+    hasFireplace: true,
+    showTapeOut: true,
+    isMobile: true,
+    viewportW: 375
+  });
+  cfgs.push({
+    ...base,
+    name: "tape-out wide TV high",
+    brand: "Samsung",
+    selectedSize: 98,
+    mountSystem: "fa",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    showTapeOut: true,
+    override: String(108 - tvDims(98).h / 2 - 1)
+  });
+  cfgs.push({
+    ...base,
+    name: "tape-out offset TV",
+    brand: "LG",
+    selectedSize: 55,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "dec",
+    hasFireplace: false,
+    showTapeOut: true,
+    tvOffsetIn: -25
+  });
+  cfgs.push({
+    ...base,
+    name: "no TV, long title, narrow wall",
+    brand: "Sony",
+    selectedSize: null,
+    wallW: 80,
+    wallH: 96,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "dec",
+    hasFireplace: false,
+    projectName: "Round Trip Test Estate",
+    clientName: "R. Carter-Wellington"
+  });
+  // sanus full-motion + XL tilt: mount pill, big plates, depth callout
+  cfgs.push({
+    ...base,
+    name: "sanus FM 85 ftin",
+    brand: "Samsung",
+    selectedSize: 85,
+    mountSystem: "sanus",
+    sanusStyle: "fullmotion",
+    dispUnits: "ftin",
+    hasFireplace: false
+  });
+  cfgs.push({
+    ...base,
+    name: "sanus FM 48 fp",
+    brand: "Sony",
+    selectedSize: 48,
+    mountSystem: "sanus",
+    sanusStyle: "fullmotion",
+    dispUnits: "dec",
+    hasFireplace: true
+  });
+  cfgs.push({
+    ...base,
+    name: "sanus XL tilt 97",
+    brand: "LG",
+    selectedSize: 97,
+    mountSystem: "sanus",
+    sanusStyle: "tilt",
+    dispUnits: "ftin",
+    hasFireplace: false
+  });
+  cfgs.push({
+    ...base,
+    name: "sanus FM mobile tape",
+    brand: "Samsung",
+    selectedSize: 75,
+    mountSystem: "sanus",
+    sanusStyle: "fullmotion",
+    dispUnits: "frac",
+    hasFireplace: false,
+    showTapeOut: true,
     isMobile: true,
     viewportW: 375
   });
@@ -2505,6 +3199,7 @@ const runStressSweep = () => {
   cfgs.forEach(cfg => {
     const recommended = computeRecommendedCenterH({
       selectedSize: cfg.selectedSize,
+      brand: cfg.brand,
       hasFireplace: cfg.hasFireplace,
       hasMantel: cfg.hasMantel,
       mantelH: cfg.mantelH,
@@ -2516,7 +3211,8 @@ const runStressSweep = () => {
       mountHeightOverride: cfg.override,
       heightRef: cfg.heightRef,
       recommendedCenterH: recommended,
-      selectedSize: cfg.selectedSize
+      selectedSize: cfg.selectedSize,
+      brand: cfg.brand
     });
     const tvCL = computeTvCL({
       wallW: cfg.wallW,
@@ -2524,7 +3220,8 @@ const runStressSweep = () => {
       fbOffsetIn: cfg.fbOffsetIn || 0,
       tvOffsetIn: cfg.tvOffsetIn || 0
     });
-    const boxModel = recommendBackBox(cfg.selectedSize, cfg.mountType, cfg.brand);
+    const boxModel = recommendBackBox(cfg.selectedSize, cfg.mountSystem, cfg.brand);
+    const sanusMount = cfg.mountSystem === "sanus" ? recommendSanusMount(cfg.selectedSize, cfg.sanusStyle || "fixed", cfg.brand) : null;
     const layout = computeLayout({
       selectedSize: cfg.selectedSize,
       brand: cfg.brand,
@@ -2532,7 +3229,8 @@ const runStressSweep = () => {
       tvCL,
       showBackBox: true,
       effectiveBoxModel: boxModel,
-      mountType: cfg.mountType
+      mountSystem: cfg.mountSystem,
+      sanusMount
     });
     const schem = buildSchematic({
       ...cfg,
@@ -2830,13 +3528,23 @@ function App() {
   const [brand, setBrand] = useState(SAVED_BRAND);
   const [selectedSize, setSelectedSize] = useState(SAVED_SIZE);
   const [tvOffsetX, setTvOffsetX] = useState(SAVED.tvOffsetX ?? "");
-  const [mountType, setMountType] = useState(SAVED.mountType === "articulating" ? "articulating" : "flat");
+
+  // migration: legacy designs stored mountType; articulating mapped to FA
+  const [mountSystem, setMountSystem] = useState(SAVED.mountSystem === "fa" || SAVED.mountSystem === "sanus" ? SAVED.mountSystem : SAVED.mountType === "articulating" ? "fa" : "sanus");
+  const [sanusStyle, setSanusStyle] = useState(["fixed", "tilt", "fullmotion"].includes(SAVED.sanusStyle) ? SAVED.sanusStyle : "fixed");
+  const [sanusMountModel, setSanusMountModel] = useState(SANUS_MOUNTS[SAVED.sanusMountModel] ? SAVED.sanusMountModel : "auto");
+  const [tvWeight, setTvWeight] = useState(SAVED.tvWeight ?? "");
   const [showBackBox, setShowBackBox] = useState(SAVED.showBackBox ?? true);
   const [backBoxModel, setBackBoxModel] = useState(BACK_BOXES[SAVED.backBoxModel] ? SAVED.backBoxModel : "FA-WB26");
   const [autoRecommendBox, setAutoRecommendBox] = useState(SAVED.autoRecommendBox ?? true);
   const [showOutlet, setShowOutlet] = useState(SAVED.showOutlet ?? true);
   const [showLowVolt, setShowLowVolt] = useState(SAVED.showLowVolt ?? true);
   const [showVesa, setShowVesa] = useState(SAVED.showVesa ?? true);
+  const [showBoxDims, setShowBoxDims] = useState(SAVED.showBoxDims ?? true);
+  const [showTvDims, setShowTvDims] = useState(SAVED.showTvDims ?? true);
+  const [showTapeOut, setShowTapeOut] = useState(SAVED.showTapeOut ?? false);
+  const [showTravel, setShowTravel] = useState(SAVED.showTravel ?? true);
+  const [bracketTravel, setBracketTravel] = useState(SAVED.bracketTravel ?? "1.5");
   const [mountHeightOverride, setMountHeightOverride] = useState(SAVED.mountHeightOverride ?? "");
   const [heightRef, setHeightRef] = useState(SAVED.heightRef === "bottom" ? "bottom" : "center");
   const [showAllSizes, setShowAllSizes] = useState(SAVED.showAllSizes ?? false);
@@ -2879,13 +3587,21 @@ function App() {
         brand,
         selectedSize,
         tvOffsetX,
-        mountType,
+        mountSystem,
+        sanusStyle,
+        sanusMountModel,
+        tvWeight,
         showBackBox,
         backBoxModel,
         autoRecommendBox,
         showOutlet,
         showLowVolt,
         showVesa,
+        showBoxDims,
+        showTvDims,
+        showTapeOut,
+        showTravel,
+        bracketTravel,
         mountHeightOverride,
         heightRef,
         showAllSizes,
@@ -2895,10 +3611,11 @@ function App() {
         dispUnits
       }));
     } catch {/* storage unavailable — run without persistence */}
-  }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
+  }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
   const resetAll = () => {
     try {
       window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch {}
     window.location.reload();
   };
@@ -2908,7 +3625,9 @@ function App() {
   const fmt = v => fmtIn(v, dispUnits);
   const fbOffsetIn = parseFloat(fbOffsetX) || 0;
   const tvOffsetIn = parseFloat(tvOffsetX) || 0;
+  const travelIn = parseFloat(bracketTravel) || 0;
   const engineInputs = {
+    brand,
     wallW,
     wallH,
     hasFireplace,
@@ -2925,14 +3644,31 @@ function App() {
   const recommendedCenterH = useMemo(() => computeRecommendedCenterH({
     selectedSize,
     ...engineInputs
-  }), [selectedSize, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
+  }), [selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
   const centerH = useMemo(() => computeCenterH({
     mountHeightOverride,
     heightRef,
     recommendedCenterH,
-    selectedSize
-  }), [mountHeightOverride, heightRef, recommendedCenterH, selectedSize]);
-  const recommendedBox = useMemo(() => recommendBackBox(selectedSize, mountType, brand), [selectedSize, mountType, brand]);
+    selectedSize,
+    brand
+  }), [mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand]);
+  const recommendedBox = useMemo(() => recommendBackBox(selectedSize, mountSystem, brand), [selectedSize, mountSystem, brand]);
+  const recommendedMount = useMemo(() => recommendSanusMount(selectedSize, sanusStyle, brand), [selectedSize, sanusStyle, brand]);
+  const sanusMount = useMemo(() => {
+    if (mountSystem !== "sanus") return null;
+    if (sanusMountModel === "auto") return recommendedMount;
+    const m = SANUS_MOUNTS[sanusMountModel];
+    if (!m) return recommendedMount;
+    const spec = selectedSize ? VESA_DATA[brand]?.[selectedSize] || null : null;
+    return {
+      key: sanusMountModel,
+      ...m,
+      sizeOk: !selectedSize || selectedSize >= m.tvMin && selectedSize <= m.tvMax,
+      vesaOk: !spec || spec.w_mm <= m.vesaMaxW && spec.h_mm <= m.vesaMaxH,
+      styleFallback: false
+    };
+  }, [mountSystem, sanusMountModel, recommendedMount, selectedSize, brand]);
+  const tvWeightLbs = parseFloat(tvWeight) || 0;
   const effectiveBoxModel = autoRecommendBox && recommendedBox ? recommendedBox : backBoxModel;
   const vesaSpec = selectedSize ? VESA_DATA[brand]?.[selectedSize] || null : null;
   const tvCL = computeTvCL({
@@ -2948,8 +3684,9 @@ function App() {
     tvCL,
     showBackBox,
     effectiveBoxModel,
-    mountType
-  }), [selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountType]);
+    mountSystem,
+    sanusMount
+  }), [selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountSystem, sanusMount]);
   const placementIssues = useMemo(() => computePlacementIssues({
     layout,
     wallW,
@@ -2960,8 +3697,10 @@ function App() {
   }), [layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn]);
 
   // engine-computed display values (UI does no arithmetic)
-  const recommendedDisplayH = heightRef === "bottom" && selectedSize ? recommendedCenterH - tvDims(selectedSize).h / 2 : recommendedCenterH;
-  const equivalentH = selectedSize ? heightRef === "bottom" ? recommendedCenterH : convertOverride(recommendedCenterH, "bottom", selectedSize) : null;
+  const recommendedDisplayH = heightRef === "bottom" && selectedSize ? recommendedCenterH - tvDimsFor(brand, selectedSize).h / 2 : recommendedCenterH;
+  const equivalentH = selectedSize ? heightRef === "bottom" ? recommendedCenterH : convertOverride(recommendedCenterH, "bottom", brand, selectedSize) : null;
+  const specPanel = selectedSize ? TV_OVERRIDES[brand]?.[selectedSize] || null : null;
+  const effWeightLbs = tvWeightLbs > 0 ? tvWeightLbs : specPanel?.weightLbs || 0;
 
   // ----- schematic: screen (navy blueprint) + print (white blueline) -----
   const schemState = {
@@ -2978,10 +3717,15 @@ function App() {
     selectedSize,
     layout,
     heightRef,
-    mountType,
+    mountSystem,
     showVesa,
     showOutlet,
     showLowVolt,
+    showBoxDims,
+    showTvDims,
+    showTapeOut,
+    showTravel,
+    travelIn,
     projectName,
     clientName,
     revision,
@@ -2990,13 +3734,13 @@ function App() {
     isTablet,
     viewportW
   };
-  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountType, showVesa, showOutlet, showLowVolt, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
+  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
   const printSchem = useMemo(() => buildSchematic({
     ...schemState,
     isMobile: false,
     isTablet: false,
     viewportW: 1280
-  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountType, showVesa, showOutlet, showLowVolt, projectName, clientName, revision, dispUnits]);
+  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, projectName, clientName, revision, dispUnits]);
   const svgRef = useRef(null);
   const printRef = useRef(null);
   const fileRef = useRef(null);
@@ -3072,13 +3816,21 @@ function App() {
     brand,
     selectedSize,
     tvOffsetX,
-    mountType,
+    mountSystem,
+    sanusStyle,
+    sanusMountModel,
+    tvWeight,
     showBackBox,
     backBoxModel,
     autoRecommendBox,
     showOutlet,
     showLowVolt,
     showVesa,
+    showBoxDims,
+    showTvDims,
+    showTapeOut,
+    showTravel,
+    bracketTravel,
     mountHeightOverride,
     heightRef,
     showAllSizes,
@@ -3113,10 +3865,11 @@ function App() {
       brand,
       selectedSize,
       dispUnits,
-      mountType,
       showVesa,
       showOutlet,
       showLowVolt,
+      showBoxDims,
+      showTapeOut,
       heightRef,
       projectName,
       clientName,
@@ -3169,7 +3922,10 @@ function App() {
     if (num(f.viewDist) != null) setViewDist(f.viewDist);
     if (typeof f.useViewDist === "boolean") setUseViewDist(f.useViewDist);
     if (typeof f.tvOffsetX === "string" || num(f.tvOffsetX) != null) setTvOffsetX(String(f.tvOffsetX));
-    if (f.mountType === "flat" || f.mountType === "articulating") setMountType(f.mountType);
+    if (f.mountSystem === "sanus" || f.mountSystem === "fa") setMountSystem(f.mountSystem);else if (f.mountType === "articulating") setMountSystem("fa");else if (f.mountType === "flat") setMountSystem("sanus");
+    if (["fixed", "tilt", "fullmotion"].includes(f.sanusStyle)) setSanusStyle(f.sanusStyle);
+    if (SANUS_MOUNTS[f.sanusMountModel]) setSanusMountModel(f.sanusMountModel);
+    if (typeof f.tvWeight === "string") setTvWeight(f.tvWeight);
     if (typeof f.showBackBox === "boolean") setShowBackBox(f.showBackBox);
     if (BACK_BOXES[f.backBoxModel]) setBackBoxModel(f.backBoxModel);
     if (typeof f.autoRecommendBox === "boolean") setAutoRecommendBox(f.autoRecommendBox);
@@ -3262,10 +4018,29 @@ function App() {
       if (Math.abs(d) < 0.05) return "on TV centerline";
       return `${fmt(Math.abs(d))} ${d < 0 ? "left" : "right"} of TV centerline`;
     };
-    const specRows = [["TV", `${brand} ${selectedSize}"`], ["TV Width", fmt(layout.tvW)], ["TV Height", fmt(layout.tvH)], ["Center to floor", fmt(layout.centerH)], ["Bottom to floor", fmt(layout.tvBottom)], ["TV centerline", `${fmt(layout.tvCL)} from left wall edge`], ["Mount type", mountType === "flat" ? "Flat" : "Articulating"]];
+    const specRows = [["TV", `${brand} ${selectedSize}"`], ["TV Width", fmt(layout.tvW)], ["TV Height", fmt(layout.tvH)], ["Center to floor", fmt(layout.centerH)], ["Bottom to floor", fmt(layout.tvBottom)], ["TV centerline", `${fmt(layout.tvCL)} from left wall edge`], ["Mount", layout.mount ? layout.mount.system === "fa" ? "Future Automation articulating bracket" : `Sanus Black ${layout.mount.model} (${layout.mount.name})` : "TBD"]];
+    if (layout.mount?.system === "sanus") {
+      specRows.push(["Mount depth", `${fmt(layout.mount.depth)} off wall${layout.mount.ext ? `, extends to ${fmt(layout.mount.ext)}` : ""}`]);
+    }
+    if (specPanel) {
+      if (specPanel.weightLbs) specRows.push(["Panel weight", `${specPanel.weightLbs} lbs (spec sheet)`]);
+      if (specPanel.d && layout.mount?.system === "sanus") specRows.push(["Total off wall", `≈ ${fmt(layout.mount.depth + specPanel.d)} (mount + panel)`]);
+    }
     if (layout.box) {
       specRows.push(["Back box", `${layout.box.brand} ${layout.box.label}`]);
       specRows.push(["Box dimensions", `${layout.box.w}" x ${layout.box.h}" x ${layout.box.d}"D`]);
+    }
+    if (showBoxDims && layout.box) {
+      specRows.push(["Box bottom edge", `${fmt(layout.box.btm)} AFF`]);
+      const bd = layout.box.btm - layout.tvBottom;
+      specRows.push(["Box bottom vs TV bottom", `${fmt(Math.abs(bd))} ${bd >= 0 ? "above" : "below"} TV bottom`]);
+      if (hasFireplace && hasMantel) specRows.push(["Box bottom above mantel", fmt(layout.box.btm - mantelH)]);
+    }
+    if (showTapeOut) {
+      specRows.push(["Tape: top edge", `${fmt(layout.tvTop)} AFF`]);
+      specRows.push(["Tape: bottom edge", `${fmt(layout.tvBottom)} AFF`]);
+      specRows.push(["Tape: left edge", `${fmt(layout.tvLeft)} from left wall`]);
+      specRows.push(["Tape: right edge", `${fmt(layout.tvRight)} from left wall`]);
     }
     if (showOutlet) specRows.push(["Power outlet", `${fmt(layout.outlet.aff)} AFF, ${sideTxt(layout.outlet.x)}`]);
     if (showLowVolt) specRows.push(["Low-voltage feed", `${fmt(layout.lv.aff)} AFF, ${sideTxt(layout.lv.x)}`]);
@@ -3281,11 +4056,10 @@ function App() {
     }
     const parts = buildPartsList({
       layout,
-      mountType,
       showOutlet,
       showLowVolt
     });
-    const docTitle = projectName.trim() ? `${projectName.trim()} — ${brand} ${selectedSize}"` : `TV Wall Layout — ${brand} ${selectedSize}"`;
+    const docTitle = projectName.trim() ? `${projectName.trim()} — ${brand} ${selectedSize}"` : `TellaVision — ${brand} ${selectedSize}"`;
     const metaHtml = "Front Elevation · REV " + (revision || "01") + (clientName.trim() ? "<br/>" + clientName.trim() : "") + "<br/>" + today;
     const specRowsHtml = specRows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
     const partsHtml = parts.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
@@ -3340,7 +4114,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     setMountHeightOverride(prev => {
       const v = parseFloat(prev);
       if (isNaN(v) || !selectedSize) return "";
-      const conv = convertOverride(v, toRef, selectedSize);
+      const conv = convertOverride(v, toRef, brand, selectedSize);
       return conv == null ? "" : conv.toFixed(1);
     });
   };
@@ -3500,21 +4274,119 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     title: "Mount"
   }, /*#__PURE__*/React.createElement(Seg, {
     options: [{
-      value: "flat",
-      label: "Flat"
+      value: "sanus",
+      label: "Sanus Black"
     }, {
-      value: "articulating",
-      label: "Articulating"
+      value: "fa",
+      label: "Future Automation"
     }],
-    value: mountType,
-    onChange: setMountType
-  }), /*#__PURE__*/React.createElement("div", {
+    value: mountSystem,
+    onChange: setMountSystem
+  }), mountSystem === "fa" && /*#__PURE__*/React.createElement("div", {
     className: "hint",
     style: {
       marginTop: 6,
       marginBottom: 14
     }
-  }, mountType === "flat" ? "Low-profile, tight to wall. Best for straight-on viewing." : "Full-motion: pulls out, swivels, tilts. Recommended for fireplace installs or off-axis seating."), /*#__PURE__*/React.createElement(Field, {
+  }, "FA articulating bracket + WB back box. The box location dictates the TV position \u2014 see Back Box."), mountSystem === "sanus" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement(Seg, {
+    options: [{
+      value: "fixed",
+      label: "Fixed"
+    }, {
+      value: "tilt",
+      label: "Tilt"
+    }, {
+      value: "fullmotion",
+      label: "Full Motion"
+    }],
+    value: sanusStyle,
+    onChange: v => {
+      setSanusStyle(v);
+      setSanusMountModel("auto");
+    }
+  })), selectedSize && sanusMount && /*#__PURE__*/React.createElement("div", {
+    className: "rec-box"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rec-tag"
+  }, sanusMountModel === "auto" ? "RECOMMENDED" : "SELECTED", sanusMount.styleFallback ? " — NO " + sanusStyle.toUpperCase() + " THIS SIZE, XL TILT SHOWN" : ""), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600
+    }
+  }, "Sanus Black ", sanusMount.model), /*#__PURE__*/React.createElement("div", null, sanusMount.name, " \xB7 ", sanusMount.tvMin, "\"\u2013", sanusMount.tvMax, "\" \xB7 ", sanusMount.capLbs, " lbs"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      opacity: 0.8,
+      marginTop: 3
+    }
+  }, "VESA to ", sanusMount.vesaMaxW, "\xD7", sanusMount.vesaMaxH, " \xB7 plate ", sanusMount.plateW, "\" \xD7 ", sanusMount.plateH, "\"", sanusMount.tilt ? ` · tilt ${sanusMount.tilt}°` : "", sanusMount.swivel ? ` · swivel ${sanusMount.swivel}°` : ""), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      marginTop: 4,
+      color: "var(--acc)"
+    }
+  }, "DEPTH ", fmt(sanusMount.depth), " off wall", sanusMount.ext ? ` — extends to ${fmt(sanusMount.ext)}` : "", specPanel?.d ? ` · TOTAL ≈ ${fmt(sanusMount.depth + specPanel.d)} incl. panel` : ""), specPanel?.weightLbs && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      marginTop: 3,
+      opacity: 0.85
+    }
+  }, "Panel: ", specPanel.weightLbs, " lbs (spec) \u2014 ", specPanel.model), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      opacity: 0.6,
+      marginTop: 3
+    }
+  }, "List $", sanusMount.list)), selectedSize && !sanusMount && /*#__PURE__*/React.createElement("div", {
+    className: "warn-box"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "warn-title"
+  }, "NO SANUS BLACK MOUNT"), "No Black Series mount covers ", selectedSize, "\" (catalog spans 37\"\u2013110\"). Spec Future Automation or a custom solution."), selectedSize && sanusMount && !sanusMount.sizeOk && /*#__PURE__*/React.createElement("div", {
+    className: "warn-box"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "warn-title"
+  }, "SIZE OUT OF RANGE"), sanusMount.model, " is rated ", sanusMount.tvMin, "\"\u2013", sanusMount.tvMax, "\" \u2014 selected ", selectedSize, "\"."), selectedSize && sanusMount && !sanusMount.vesaOk && vesaSpec && /*#__PURE__*/React.createElement("div", {
+    className: "note-box"
+  }, /*#__PURE__*/React.createElement("strong", null, "VESA check:"), " TV pattern ", vesaSpec.w_mm, "\xD7", vesaSpec.h_mm, " exceeds ", sanusMount.model, " max ", sanusMount.vesaMaxW, "\xD7", sanusMount.vesaMaxH, "."), selectedSize && sanusMount && effWeightLbs > 0 && effWeightLbs > sanusMount.capLbs && /*#__PURE__*/React.createElement("div", {
+    className: "warn-box"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "warn-title"
+  }, "OVER WEIGHT RATING"), "TV ", effWeightLbs, " lbs", tvWeightLbs > 0 ? "" : " (from spec sheet)", " exceeds ", sanusMount.model, " capacity of ", sanusMount.capLbs, " lbs."), /*#__PURE__*/React.createElement(Field, {
+    label: "Manual selection"
+  }, /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    value: sanusMountModel,
+    onChange: e => setSanusMountModel(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "auto"
+  }, "Auto-recommend"), /*#__PURE__*/React.createElement("optgroup", {
+    label: "Fixed"
+  }, SANUS_STYLE_ORDER.fixed.map(k => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, SANUS_MOUNTS[k].model, " \u2014 ", SANUS_MOUNTS[k].name))), /*#__PURE__*/React.createElement("optgroup", {
+    label: "Tilt"
+  }, SANUS_STYLE_ORDER.tilt.map(k => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, SANUS_MOUNTS[k].model, " \u2014 ", SANUS_MOUNTS[k].name))), /*#__PURE__*/React.createElement("optgroup", {
+    label: "Full Motion"
+  }, SANUS_STYLE_ORDER.fullmotion.map(k => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, SANUS_MOUNTS[k].model, " \u2014 ", SANUS_MOUNTS[k].name))))), /*#__PURE__*/React.createElement(Field, {
+    label: "TV weight (lbs, optional)",
+    hint: "From the TV spec sheet \u2014 checked against the mount rating"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    type: "number",
+    placeholder: "for 98\u2033+ panels",
+    value: tvWeight,
+    onChange: e => setTvWeight(e.target.value)
+  }))), /*#__PURE__*/React.createElement(Field, {
     label: `Height reference`
   }, /*#__PURE__*/React.createElement(Seg, {
     options: [{
@@ -3601,7 +4473,21 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     value: k
   }, v.label))))), layout?.box?.underRated && /*#__PURE__*/React.createElement("div", {
     className: "note-box"
-  }, /*#__PURE__*/React.createElement("strong", null, "Check rating:"), " ", layout.box.label, " is rated for ", layout.box.tvMin, "\"\u2013", layout.box.tvMax, "\" TVs \u2014 selected ", selectedSize, "\". Verify bracket compatibility."))), /*#__PURE__*/React.createElement(Sec, {
+  }, /*#__PURE__*/React.createElement("strong", null, "Check rating:"), " ", layout.box.label, " is rated for ", layout.box.tvMin, "\"\u2013", layout.box.tvMax, "\" TVs \u2014 selected ", selectedSize, "\". Verify bracket compatibility."), /*#__PURE__*/React.createElement(Check, {
+    on: showBoxDims,
+    onClick: () => setShowBoxDims(!showBoxDims)
+  }, "Box rough-in dims (bottom edge)"), mountSystem === "fa" && layout?.box?.brand === "Future Automation" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Check, {
+    on: showTravel,
+    onClick: () => setShowTravel(!showTravel)
+  }, "Show bracket vertical range"), showTravel && /*#__PURE__*/React.createElement(Field, {
+    label: "Bracket travel (\xB1 in)",
+    hint: "FA PS-series hook adjustment \u2014 verify with the mount spec sheet"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    type: "number",
+    value: bracketTravel,
+    onChange: e => setBracketTravel(e.target.value)
+  }))))), /*#__PURE__*/React.createElement(Sec, {
     icon: "plug",
     title: "Electrical"
   }, /*#__PURE__*/React.createElement(Check, {
@@ -3610,13 +4496,24 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "Recessed outlet"), /*#__PURE__*/React.createElement(Check, {
     on: showLowVolt,
     onClick: () => setShowLowVolt(!showLowVolt)
-  }, "Low-voltage feed")), showVesa !== null && /*#__PURE__*/React.createElement(Sec, {
+  }, "Low-voltage feed")), /*#__PURE__*/React.createElement(Sec, {
+    icon: "tv",
+    title: "Drawing"
+  }, /*#__PURE__*/React.createElement(Check, {
+    on: showTvDims,
+    onClick: () => setShowTvDims(!showTvDims)
+  }, "TV W \xD7 H dimensions"), /*#__PURE__*/React.createElement(Check, {
+    on: showTapeOut,
+    onClick: () => setShowTapeOut(!showTapeOut)
+  }, "Tape-out mode (wall tape lines)")), showVesa !== null && /*#__PURE__*/React.createElement(Sec, {
     icon: "bolt",
     title: "VESA"
   }, /*#__PURE__*/React.createElement(Check, {
     on: showVesa,
     onClick: () => setShowVesa(!showVesa)
-  }, "Show VESA on drawing"), showVesa && selectedSize && vesaSpec && /*#__PURE__*/React.createElement("div", {
+  }, "Show VESA on drawing"), showVesa && selectedSize && !vesaSpec && /*#__PURE__*/React.createElement("div", {
+    className: "note-box"
+  }, /*#__PURE__*/React.createElement("strong", null, "No VESA data for this panel"), " \u2014 pattern not published yet", TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : "", ". Pull it from the TV's spec sheet before rough-in."), showVesa && selectedSize && vesaSpec && /*#__PURE__*/React.createElement("div", {
     className: "vesa-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "rec-tag"
@@ -3656,10 +4553,19 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "size-strip-head"
   }, /*#__PURE__*/React.createElement("span", {
     className: "strip-title"
-  }, showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`), /*#__PURE__*/React.createElement("button", {
+  }, showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `chip ${showTapeOut ? "on" : ""}`,
+    onClick: () => setShowTapeOut(!showTapeOut),
+    title: "Show the tape lines to mark the TV on the real wall"
+  }, "TAPE-OUT"), /*#__PURE__*/React.createElement("button", {
     className: `chip ${showAllSizes ? "on" : ""}`,
     onClick: () => setShowAllSizes(!showAllSizes)
-  }, "SHOW ALL")), /*#__PURE__*/React.createElement("div", {
+  }, "SHOW ALL"))), /*#__PURE__*/React.createElement("div", {
     className: "size-strip"
   }, (showAllSizes ? TV_CATALOG[brand] : recommendations).map(sz => {
     const fitIssues = computeFitIssues(sz, engineInputs);
@@ -3700,7 +4606,13 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "sv"
   }, /*#__PURE__*/React.createElement("em", null, "CTR"), " ", fmt(layout.centerH)), /*#__PURE__*/React.createElement("span", {
     className: "sv"
-  }, /*#__PURE__*/React.createElement("em", null, "BTM"), " ", fmt(layout.tvBottom)), showOutlet && /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("em", null, "BTM"), " ", fmt(layout.tvBottom)), showTapeOut && /*#__PURE__*/React.createElement("span", {
+    className: "sv"
+  }, /*#__PURE__*/React.createElement("em", null, "TOP"), " ", fmt(layout.tvTop)), showBoxDims && layout.box && /*#__PURE__*/React.createElement("span", {
+    className: "sv"
+  }, /*#__PURE__*/React.createElement("em", null, "BOX BTM"), " ", fmt(layout.box.btm)), layout.mount?.system === "sanus" && /*#__PURE__*/React.createElement("span", {
+    className: "sv"
+  }, /*#__PURE__*/React.createElement("em", null, "DEPTH"), " ", fmt(layout.mount.depth), layout.mount.ext ? `–${fmt(layout.mount.ext)}` : ""), showOutlet && /*#__PURE__*/React.createElement("span", {
     className: "sv"
   }, /*#__PURE__*/React.createElement("em", null, "PWR"), " ", fmt(layout.outlet.aff)), layout.vesa && /*#__PURE__*/React.createElement("span", {
     className: "sv"
@@ -3745,7 +4657,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "SWEEP"), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: () => {
-      const report = [`TV WALL PLANNER DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`, `Self-tests: ${selfTest.passed}/${selfTest.total} ${allTestsPass ? "PASS" : "FAIL"}`, `Render audit: ${renderAudit.overlaps} overlaps, ${renderAudit.clipped} clipped (${renderAudit.checked} labels)`, sweep ? `Stress sweep: ${sweep.failures.length} failing configs / ${sweep.total}` : `Stress sweep: not run`, ``, ...selfTest.results.map(r => `[${r.group}] ${r.pass ? "PASS" : "FAIL"} — ${r.name}${r.detail && !r.pass ? ` :: ${r.detail}` : ""}`), ...(sweep && sweep.failures.length ? [``, ...sweep.failures.map(f => `[sweep] FAIL — ${f.name}: ${f.overlaps} overlaps, ${f.clipped} clipped :: ${f.pairs.join(" | ")}`)] : []), ``, `State: ${JSON.stringify({
+      const report = [`TELLAVISION DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`, `Self-tests: ${selfTest.passed}/${selfTest.total} ${allTestsPass ? "PASS" : "FAIL"}`, `Render audit: ${renderAudit.overlaps} overlaps, ${renderAudit.clipped} clipped (${renderAudit.checked} labels)`, sweep ? `Stress sweep: ${sweep.failures.length} failing configs / ${sweep.total}` : `Stress sweep: not run`, ``, ...selfTest.results.map(r => `[${r.group}] ${r.pass ? "PASS" : "FAIL"} — ${r.name}${r.detail && !r.pass ? ` :: ${r.detail}` : ""}`), ...(sweep && sweep.failures.length ? [``, ...sweep.failures.map(f => `[sweep] FAIL — ${f.name}: ${f.overlaps} overlaps, ${f.clipped} clipped :: ${f.pairs.join(" | ")}`)] : []), ``, `State: ${JSON.stringify({
         wallW,
         wallH,
         hasFireplace,
@@ -3757,7 +4669,9 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         brand,
         selectedSize,
         tvOffsetX,
-        mountType,
+        mountSystem,
+        sanusStyle,
+        sanusMountModel,
         effectiveBoxModel,
         mountHeightOverride,
         heightRef,
@@ -4113,7 +5027,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         ::-webkit-scrollbar-track { background: transparent; }
       `), /*#__PURE__*/React.createElement("header", {
     className: "hdr"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", null, "TV WALL PLANNER"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", null, "TELL\xB7A\xB7VISION"), /*#__PURE__*/React.createElement("div", {
     className: "sub"
   }, "BLUEPRINT EDITION \xB7 REV ", revision || "01", " \xB7 FRONT ELEVATION")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4182,7 +5096,11 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "stat"
   }, /*#__PURE__*/React.createElement("span", null, "Bottom AFF"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.tvBottom))), /*#__PURE__*/React.createElement("div", {
     className: "stat"
-  }, /*#__PURE__*/React.createElement("span", null, "TV CL from left"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.tvCL))), showOutlet && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "TV CL from left"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.tvCL))), showTapeOut && /*#__PURE__*/React.createElement("div", {
+    className: "stat"
+  }, /*#__PURE__*/React.createElement("span", null, "Top AFF"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.tvTop))), showBoxDims && layout.box && /*#__PURE__*/React.createElement("div", {
+    className: "stat"
+  }, /*#__PURE__*/React.createElement("span", null, "Box bottom AFF"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.box.btm))), showOutlet && /*#__PURE__*/React.createElement("div", {
     className: "stat"
   }, /*#__PURE__*/React.createElement("span", null, "Outlet AFF"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.outlet.aff))), showLowVolt && /*#__PURE__*/React.createElement("div", {
     className: "stat"
@@ -4203,7 +5121,6 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, buildPartsList({
     layout,
-    mountType,
     showOutlet,
     showLowVolt
   }).map((r, i) => /*#__PURE__*/React.createElement("div", {
