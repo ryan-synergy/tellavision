@@ -201,7 +201,9 @@ const computeLayout = ({ selectedSize, brand, centerH, tvCL, showBackBox, effect
       cx - bb.w / 2 < tvLeft || cx + bb.w / 2 > tvRight ||
       anchorAFF + bb.h / 2 > tvTop || anchorAFF - bb.h / 2 < tvBottom;
     const underRated = selectedSize < bb.tvMin || selectedSize > bb.tvMax;
-    box = { ...bb, model: effectiveBoxModel, cx, aff: anchorAFF, extendsOff, underRated };
+    // btm matters in the field: with FA mounts the box location dictates
+    // where the TV lands, so installers set the box from its bottom edge.
+    box = { ...bb, model: effectiveBoxModel, cx, aff: anchorAFF, btm: anchorAFF - bb.h / 2, extendsOff, underRated };
   }
 
   // Electrical rough-in: inside the back box when there is one, otherwise
@@ -326,7 +328,7 @@ const buildExportJSON = (design, layout) => ({
 const DXF_LAYERS = [
   ["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2],
   ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30],
-  ["DIMENSIONS", 7], ["CENTERLINE", 1], ["NOTES", 7],
+  ["DIMENSIONS", 7], ["CENTERLINE", 1], ["TAPEOUT", 5], ["NOTES", 7],
 ];
 
 const buildDXF = (S, layout) => {
@@ -446,6 +448,18 @@ const buildDXF = (S, layout) => {
   line("DIMENSIONS", wallW + 5, wallH, wallW + 7, wallH);
   text("DIMENSIONS", wallW + 8, wallH / 2, 2.5, `${fmt(wallH)} H`);
 
+  // ---- tape-out lines (where the installer snaps tape on the real wall) ----
+  if (S.showTapeOut) {
+    line("TAPEOUT", 0, layout.tvTop, wallW, layout.tvTop);
+    line("TAPEOUT", 0, layout.tvBottom, wallW, layout.tvBottom);
+    line("TAPEOUT", layout.tvLeft, 0, layout.tvLeft, layout.tvTop);
+    line("TAPEOUT", layout.tvRight, 0, layout.tvRight, layout.tvTop);
+    text("TAPEOUT", 1, layout.tvTop + 0.8, 1.6, `TAPE TOP ${fmt(layout.tvTop)} AFF`);
+    text("TAPEOUT", 1, layout.tvBottom + 0.8, 1.6, `TAPE BTM ${fmt(layout.tvBottom)} AFF`);
+    text("TAPEOUT", layout.tvLeft + 0.8, 2, 1.6, `${fmt(layout.tvLeft)}`);
+    text("TAPEOUT", layout.tvRight + 0.8, 2, 1.6, `${fmt(layout.tvRight)}`);
+  }
+
   // ---- notes column (true data, right of the wall) ----
   const nx = wallW + 24;
   let ny = wallH - 2;
@@ -456,6 +470,7 @@ const buildDXF = (S, layout) => {
   note(`TV CL: ${fmt(layout.tvCL)} FROM LEFT WALL EDGE`);
   if (layout.vesa) note(`VESA ${layout.vesa.spec.w_mm}x${layout.vesa.spec.h_mm} MM - ${layout.vesa.spec.screw} SCREWS`);
   if (layout.box) note(`BOX: ${layout.box.brand} ${layout.box.label} (${layout.box.w}x${layout.box.h}x${layout.box.d} IN)`);
+  if (S.showBoxDims && layout.box) note(`BOX BTM: ${fmt(layout.box.btm)} AFF (${fmt(Math.abs(layout.box.btm - layout.tvBottom))} ${layout.box.btm >= layout.tvBottom ? "ABV" : "BLW"} TV BTM)`);
   if (S.showOutlet) note(`PWR: ${fmt(layout.outlet.aff)} AFF, ${fmt(Math.abs(layout.outlet.x - layout.tvCL))} ${layout.outlet.x < layout.tvCL ? "LT" : "RT"} OF CL`);
   if (S.showLowVolt) note(`LV: ${fmt(layout.lv.aff)} AFF, ${fmt(Math.abs(layout.lv.x - layout.tvCL))} ${layout.lv.x < layout.tvCL ? "LT" : "RT"} OF CL`);
   note(`MOUNT: ${S.mountType === "flat" ? "FLAT" : "ARTICULATING"}`);
@@ -576,6 +591,12 @@ const runSelfTests = () => {
     T("golden", "A: PWR 36.51\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 36.5085) && approx(L.outlet.x - L.tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)} dx=${(L.outlet.x - L.tvCL).toFixed(3)}`);
     T("golden", "A: LV 19.41\" right of CL", approx(L.lv.x - L.tvCL, 19.4055), `dx=${(L.lv.x - L.tvCL).toFixed(3)}`);
     T("golden", "A: box within TV, not flagged", !L.box.extendsOff && !L.box.underRated);
+    T("golden", "A: box bottom 34.01\" AFF, 8.53\" above TV bottom",
+      approx(L.box.btm, 34.0085) && approx(L.box.btm - L.tvBottom, 8.5335),
+      `btm=${L.box.btm.toFixed(3)} d=${(L.box.btm - L.tvBottom).toFixed(3)}`);
+    T("golden", "A: tape-out edges L 31.06 / R 88.94 / T 58.53 / B 25.48",
+      approx(L.tvLeft, 31.06) && approx(L.tvRight, 88.94) && approx(L.tvTop, 58.525) && approx(L.tvBottom, 25.475),
+      `L=${L.tvLeft.toFixed(2)} R=${L.tvRight.toFixed(2)} T=${L.tvTop.toFixed(2)} B=${L.tvBottom.toFixed(2)}`);
   }
   // ---- Golden case B: "Smith Residence" — fireplace +15", mantel 54", bottom override 53.5 ----
   {
@@ -749,6 +770,7 @@ const SCREEN_PALETTE = {
   cl: "#FF7A6B", vesa: "#FFD166", box: "#3ECFE0", boxBad: "#FF5C4D", pwr: "#4ADE80", lv: "#FFA94D",
   mount: "#8DA3B8",
   pillStyle: "filled", pillText: "#06121F",
+  tape: "#5EEAD4",
   title: "#8DA3B8",
 };
 
@@ -763,6 +785,7 @@ const PRINT_PALETTE = {
   cl: "#C0392B", vesa: "#8A6A1A", box: "#0E7C90", boxBad: "#C0392B", pwr: "#1E7D3C", lv: "#B25E0F",
   mount: "#5C7186",
   pillStyle: "outline", pillText: null, // outline pills use the accent color for text
+  tape: "#0E7C90",
   title: "#5C7186",
 };
 
@@ -798,7 +821,8 @@ const buildSchematic = (S, P) => {
   const {
     wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
     mantelH, mantelDepth, brand, selectedSize, layout, heightRef,
-    showVesa, showOutlet, showLowVolt, projectName, clientName, revision,
+    showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut,
+    showTravel, travelIn, projectName, clientName, revision,
     dispUnits, isMobile, isTablet, viewportW,
   } = S;
   const fmt = (v) => fmtIn(v, dispUnits);
@@ -841,7 +865,37 @@ const buildSchematic = (S, P) => {
   const rightPad = (hDimRelX - safeWallW * scale) + 24 + textW(`${safeWallH}" H`, 13) + 12;
 
   const hasTitleBlock = !!(projectName || clientName);
-  const bottomPad = basePad + 26 + (hasTitleBlock ? 16 : 0);
+  // The leader rail can outrun a small-scale wall (anchors near the floor
+  // drag pills down). Simulate the exact packing in wall-relative space —
+  // pad-independent — and reserve the real overflow in bottomPad.
+  let railBottomRel = 0;
+  if (layout) {
+    const wallPxHRel = safeWallH * scale;
+    const relY = (aff) => wallPxHRel - aff * scale;
+    const ents = [];
+    if (layout.vesa && showVesa) ents.push({ a: relY(layout.vesa.aff + layout.vesa.h / 2), n: 2 });
+    if (layout.box) ents.push({ a: relY(layout.box.aff), n: 2 + (layout.box.extendsOff ? 1 : 0) + (showBoxDims ? 2 + (hasFireplace && hasMantel ? 1 : 0) : 0) });
+    if (showOutlet) ents.push({ a: relY(layout.outlet.aff), n: 2 });
+    if (showLowVolt) ents.push({ a: relY(layout.lv.aff), n: 2 });
+    if (showTapeOut) ents.push({ a: relY(layout.tvTop), n: 2 });
+    if (showTravel && S.mountType === "articulating" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0) ents.push({ a: relY(layout.tvTop + travelIn), n: 2 });
+    const relTvTop = relY(layout.tvTop);
+    const topFloor = showTvDims ? relTvTop + 2 - 12 : 10;
+    let prevTop = -Infinity, prevH = 0;
+    ents.map((e, i) => ({ ...e, _i: i }))
+      .sort((x, y) => (x.a - y.a) || (x._i - y._i))
+      .forEach(e => {
+        const h = 16 + (e.n - 1) * 13;
+        const top = Math.max(e.a - 16, prevTop + prevH + 8, topFloor);
+        railBottomRel = top + h;
+        prevTop = top;
+        prevH = h;
+      });
+  }
+  const bottomPad = Math.max(
+    basePad + 26 + (hasTitleBlock ? 16 : 0),
+    railBottomRel - safeWallH * scale + 30 + (hasTitleBlock ? 16 : 0)
+  );
 
   const wallX = leftPad;
   const wallY = topPad;
@@ -930,6 +984,10 @@ const buildSchematic = (S, P) => {
       bbY = floorY - (layout.box.aff + layout.box.h / 2) * scale;
       const c = layout.box.extendsOff ? P.boxBad : P.box;
       elements.push(<rect key={K("bb")} x={bbX} y={bbY} width={bbPxW} height={bbPxH} fill={c} fillOpacity="0.14" stroke={c} strokeWidth="1.8" strokeDasharray="8 4"/>);
+      if (showBoxDims) {
+        // emphasized bottom edge — the FA set line in the field
+        elements.push(<line key={K("bb-btm")} x1={bbX - 6} y1={bbY + bbPxH} x2={bbX + bbPxW + 6} y2={bbY + bbPxH} stroke={c} strokeWidth="2"/>);
+      }
     }
 
     if (showVesa && layout.vesa) {
@@ -970,6 +1028,12 @@ const buildSchematic = (S, P) => {
         { text: layout.box.brand, size: 9 },
       ];
       if (layout.box.extendsOff) lines.push({ text: "! EXTENDS BEYOND TV", size: 8 });
+      if (showBoxDims) {
+        lines.push({ text: `BOX BTM ${fmt(layout.box.btm)} AFF`, size: 9 });
+        const d = layout.box.btm - layout.tvBottom;
+        lines.push({ text: `${fmt(Math.abs(d))} ${d >= 0 ? "ABV" : "BLW"} TV BTM`, size: 9 });
+        if (hasFireplace && hasMantel) lines.push({ text: `${fmt(layout.box.btm - mantelH)} ABV MANTEL`, size: 9 });
+      }
       rail.push({ id: "bb", color: c, anchor: [bbX + bbPxW, bbY + bbPxH / 2], anchorY: bbY + bbPxH / 2, lines });
     }
     if (showOutlet) {
@@ -993,8 +1057,32 @@ const buildSchematic = (S, P) => {
         lines: [{ text: `LV ${fmt(layout.lv.aff)} AFF`, size: 10 }, { text: sideOf(layout.lv.x), size: 9 }],
       });
     }
+    if (showTapeOut) {
+      rail.push({
+        id: "tape", color: P.tape,
+        anchor: [tvX + tvPxW - 4, floorY - layout.tvTop * scale],
+        anchorY: floorY - layout.tvTop * scale,
+        lines: [{ text: "TAPE-OUT", size: 10 }, { text: "VERTICALS FROM LEFT WALL", size: 8 }],
+      });
+    }
+
+    if (showTravel && S.mountType === "articulating" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0) {
+      const t = travelIn * scale;
+      const yT = tvY - t, yB = tvY + tvPxH + t;
+      elements.push(<line key={K("tr-top")} x1={tvX + 4} y1={yT} x2={tvX + tvPxW - 4} y2={yT} stroke={P.lineSoft} strokeWidth="1" strokeDasharray="4 4" opacity="0.8"/>);
+      elements.push(<line key={K("tr-btm")} x1={tvX + 4} y1={yB} x2={tvX + tvPxW - 4} y2={yB} stroke={P.lineSoft} strokeWidth="1" strokeDasharray="4 4" opacity="0.8"/>);
+      const ax = tvX + 14;
+      elements.push(<line key={K("tr-ar")} x1={ax} y1={yT} x2={ax} y2={yB} stroke={P.lineSoft} strokeWidth="1" opacity="0.9"/>);
+      elements.push(<path key={K("tr-a1")} d={`M${ax - 3} ${yT + 6} L${ax} ${yT} L${ax + 3} ${yT + 6}`} stroke={P.lineSoft} fill="none" strokeWidth="1"/>);
+      elements.push(<path key={K("tr-a2")} d={`M${ax - 3} ${yB - 6} L${ax} ${yB} L${ax + 3} ${yB - 6}`} stroke={P.lineSoft} fill="none" strokeWidth="1"/>);
+      rail.push({
+        id: "travel", color: P.lineSoft, anchor: [tvX + tvPxW - 4, yT], anchorY: yT,
+        lines: [{ text: `TV ADJUST ±${fmt(travelIn)}`, size: 10 }, { text: "FA BRACKET — VERIFY SPEC", size: 8 }],
+      });
+    }
+
     const railX = tvX + tvPxW + 16;
-    packRail(rail, wallY + 10).forEach(e => {
+    packRail(rail, showTvDims ? tvY + 2 : wallY + 10).forEach(e => {
       elements.push(<line key={K(`${e.id}-leader`)} x1={e.anchor[0]} y1={e.anchor[1]} x2={railX - 4} y2={e.slotY - 4} stroke={e.color} strokeWidth="0.8" opacity="0.7"/>);
       pushPill(e.id, railX, e.slotY, e.lines, e.color);
     });
@@ -1017,14 +1105,16 @@ const buildSchematic = (S, P) => {
 
     // width (top, lane 0)
     const dimY = tvY - 18;
-    const wTxt = `${fmt(tvW)} W`;
-    elements.push(<line key={K("dw")} x1={tvX} y1={dimY} x2={tvX + tvPxW} y2={dimY} stroke={P.line} strokeWidth="1"/>);
-    elements.push(<line key={K("dwa")} x1={tvX} y1={dimY - 4} x2={tvX} y2={dimY + 4} stroke={P.line} strokeWidth="1"/>);
-    elements.push(<line key={K("dwb")} x1={tvX + tvPxW} y1={dimY - 4} x2={tvX + tvPxW} y2={dimY + 4} stroke={P.line} strokeWidth="1"/>);
-    const dwMidX = tvX + tvPxW / 2;
-    const dwW = textW(wTxt, 13) + 8;
-    elements.push(<rect key={K("dwbg")} x={dwMidX - dwW / 2} y={dimY - 18} width={dwW} height={16} fill={P.halo} stroke="none" rx="2"/>);
-    elements.push(<text key={K("dwt")} x={dwMidX} y={dimY - 6} textAnchor="middle" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wTxt}</text>);
+    if (showTvDims) {
+      const wTxt = `${fmt(tvW)} W × ${fmt(tvH)} H`;
+      elements.push(<line key={K("dw")} x1={tvX} y1={dimY} x2={tvX + tvPxW} y2={dimY} stroke={P.line} strokeWidth="1"/>);
+      elements.push(<line key={K("dwa")} x1={tvX} y1={dimY - 4} x2={tvX} y2={dimY + 4} stroke={P.line} strokeWidth="1"/>);
+      elements.push(<line key={K("dwb")} x1={tvX + tvPxW} y1={dimY - 4} x2={tvX + tvPxW} y2={dimY + 4} stroke={P.line} strokeWidth="1"/>);
+      const dwMidX = tvX + tvPxW / 2;
+      const dwW = textW(wTxt, 13) + 8;
+      elements.push(<rect key={K("dwbg")} x={dwMidX - dwW / 2} y={dimY - 18} width={dwW} height={16} fill={P.halo} stroke="none" rx="2"/>);
+      elements.push(<text key={K("dwt")} x={dwMidX} y={dimY - 6} textAnchor="middle" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wTxt}</text>);
+    }
 
     // centerline (top, lane 1 — steps above the width dim when crowded) +
     // dash-dot CL through the wall, stopping short of the width dimension lane
@@ -1038,6 +1128,26 @@ const buildSchematic = (S, P) => {
     const clW = textW(clTxt, 10) + 8;
     elements.push(<rect key={K("cl-bg")} x={clMidX - clW / 2} y={clDimY - 16} width={clW} height={13} fill={P.halo} stroke="none" rx="2"/>);
     elements.push(<text key={K("cl-t")} x={clMidX} y={clDimY - 6} textAnchor="middle" fill={P.cl} fontSize="10" fontWeight="600" fontFamily="'IBM Plex Mono', monospace" letterSpacing="0.5">{clTxt}</text>);
+
+    // tape-out mode: the four lines an installer actually snaps on the wall
+    if (showTapeOut) {
+      const tTop = floorY - layout.tvTop * scale;
+      const tBtm = floorY - layout.tvBottom * scale;
+      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} AFF`], ["t-btm", tBtm, `BTM ${fmt(layout.tvBottom)} AFF`]].forEach(([id, y, txt]) => {
+        elements.push(<line key={K(id)} x1={wallX + 2} y1={y} x2={wallX + wallPxW - 2} y2={y} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
+        const w = textW(txt, 10) + 10;
+        elements.push(<rect key={K(`${id}-bg`)} x={wallX + 6} y={y - 14} width={w} height={13} fill={P.halo} rx="2"/>);
+        elements.push(<text key={K(`${id}-t`)} x={wallX + 11} y={y - 4} fill={P.tape} fontSize="10" fontWeight="700" fontFamily="'IBM Plex Mono', monospace">{txt}</text>);
+      });
+      [["t-l", layout.tvLeft], ["t-r", layout.tvRight]].forEach(([id, v]) => {
+        const x = wallX + v * scale;
+        elements.push(<line key={K(id)} x1={x} y1={tTop} x2={x} y2={floorY - 2} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
+        const txt = fmt(v);
+        const w = textW(txt, 10) + 10;
+        elements.push(<rect key={K(`${id}-bg`)} x={x - w / 2} y={floorY - 24} width={w} height={13} fill={P.halo} rx="2"/>);
+        elements.push(<text key={K(`${id}-t`)} x={x} y={floorY - 14} textAnchor="middle" fill={P.tape} fontSize="10" fontWeight="700" fontFamily="'IBM Plex Mono', monospace">{txt}</text>);
+      });
+    }
   }
 
   // wall width (bottom)
@@ -1074,6 +1184,7 @@ const sweepConfigs = () => {
   const base = {
     wallW: 120, wallH: 108, fbOpeningW: 40, fbOpeningH: 30, mantelH: 54, mantelDepth: 8,
     fbOffsetIn: 0, hasMantel: true, showVesa: true, showOutlet: true, showLowVolt: true,
+    showBoxDims: true, showTvDims: true, showTapeOut: false, showTravel: true, travelIn: 1.5,
     projectName: "Sweep", clientName: "QA", revision: "01",
     isMobile: false, isTablet: false, viewportW: 1280, heightRef: "center", override: "",
   };
@@ -1099,6 +1210,11 @@ const sweepConfigs = () => {
   cfgs.push({ ...base, name: "TV hard right", brand: "Sony", selectedSize: 55, mountType: "flat", dispUnits: "ftin", hasFireplace: false, tvOffsetIn: 33, heightRef: "bottom" });
   cfgs.push({ ...base, name: "wide TV near top + ftin + fp", brand: "Samsung", selectedSize: 98, mountType: "articulating", dispUnits: "ftin", hasFireplace: true, override: String(108 - tvDims(98).h / 2 - 0.5) });
   cfgs.push({ ...base, name: "mobile giant wall", brand: "LG", selectedSize: 97, wallW: 280, wallH: 130, mountType: "flat", dispUnits: "frac", hasFireplace: false, isMobile: true, viewportW: 375 });
+  // tape-out mode at the extremes
+  cfgs.push({ ...base, name: "tape-out open wall ftin", brand: "Sony", selectedSize: 65, mountType: "flat", dispUnits: "ftin", hasFireplace: false, showTapeOut: true });
+  cfgs.push({ ...base, name: "tape-out small TV mobile", brand: "Samsung", selectedSize: 32, mountType: "flat", dispUnits: "frac", hasFireplace: true, showTapeOut: true, isMobile: true, viewportW: 375 });
+  cfgs.push({ ...base, name: "tape-out wide TV high", brand: "Samsung", selectedSize: 98, mountType: "articulating", dispUnits: "ftin", hasFireplace: false, showTapeOut: true, override: String(108 - tvDims(98).h / 2 - 1) });
+  cfgs.push({ ...base, name: "tape-out offset TV", brand: "LG", selectedSize: 55, mountType: "flat", dispUnits: "dec", hasFireplace: false, showTapeOut: true, tvOffsetIn: -25 });
   return cfgs;
 };
 
@@ -1218,6 +1334,11 @@ export default function App() {
   const [showOutlet, setShowOutlet] = useState(SAVED.showOutlet ?? true);
   const [showLowVolt, setShowLowVolt] = useState(SAVED.showLowVolt ?? true);
   const [showVesa, setShowVesa] = useState(SAVED.showVesa ?? true);
+  const [showBoxDims, setShowBoxDims] = useState(SAVED.showBoxDims ?? true);
+  const [showTvDims, setShowTvDims] = useState(SAVED.showTvDims ?? true);
+  const [showTapeOut, setShowTapeOut] = useState(SAVED.showTapeOut ?? false);
+  const [showTravel, setShowTravel] = useState(SAVED.showTravel ?? true);
+  const [bracketTravel, setBracketTravel] = useState(SAVED.bracketTravel ?? "1.5");
 
   const [mountHeightOverride, setMountHeightOverride] = useState(SAVED.mountHeightOverride ?? "");
   const [heightRef, setHeightRef] = useState(SAVED.heightRef === "bottom" ? "bottom" : "center");
@@ -1249,14 +1370,16 @@ export default function App() {
         wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
         mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
         mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet,
-        showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes,
+        showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
+        bracketTravel, mountHeightOverride, heightRef, showAllSizes,
         projectName, clientName, revision, dispUnits,
       }));
     } catch { /* storage unavailable — run without persistence */ }
   }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
       mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
       mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet,
-      showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes,
+      showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
+      bracketTravel, mountHeightOverride, heightRef, showAllSizes,
       projectName, clientName, revision, dispUnits]);
 
   const resetAll = () => {
@@ -1270,6 +1393,7 @@ export default function App() {
 
   const fbOffsetIn = parseFloat(fbOffsetX) || 0;
   const tvOffsetIn = parseFloat(tvOffsetX) || 0;
+  const travelIn = parseFloat(bracketTravel) || 0;
   const engineInputs = { wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist };
 
   const recommendations = useMemo(() => computeRecommendations({ brand, ...engineInputs }),
@@ -1304,16 +1428,19 @@ export default function App() {
   const schemState = {
     wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
     mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountType,
-    showVesa, showOutlet, showLowVolt, projectName, clientName, revision,
+    showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut,
+    showTravel, travelIn, projectName, clientName, revision,
     dispUnits, isMobile, isTablet, viewportW,
   };
   const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountType, showVesa, showOutlet, showLowVolt,
+     showBoxDims, showTvDims, showTapeOut, showTravel, travelIn,
      projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
   const printSchem = useMemo(() => buildSchematic({ ...schemState, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountType, showVesa, showOutlet, showLowVolt,
+     showBoxDims, showTvDims, showTapeOut, showTravel, travelIn,
      projectName, clientName, revision, dispUnits]);
 
   const svgRef = useRef(null);
@@ -1366,7 +1493,8 @@ export default function App() {
     wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
     mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
     mountType, showBackBox, backBoxModel, autoRecommendBox, showOutlet,
-    showLowVolt, showVesa, mountHeightOverride, heightRef, showAllSizes,
+    showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
+    bracketTravel, mountHeightOverride, heightRef, showAllSizes,
     projectName, clientName, revision, dispUnits,
   };
 
@@ -1385,7 +1513,8 @@ export default function App() {
     const dxf = buildDXF({
       wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel,
       mantelH, mantelDepth, brand, selectedSize, dispUnits, mountType,
-      showVesa, showOutlet, showLowVolt, heightRef, projectName, clientName, revision,
+      showVesa, showOutlet, showLowVolt, showBoxDims, showTapeOut,
+      heightRef, projectName, clientName, revision,
     }, layout);
     const blob = new Blob([dxf], { type: "application/dxf" });
     const url = URL.createObjectURL(blob);
@@ -1510,6 +1639,18 @@ export default function App() {
     if (layout.box) {
       specRows.push(["Back box", `${layout.box.brand} ${layout.box.label}`]);
       specRows.push(["Box dimensions", `${layout.box.w}" x ${layout.box.h}" x ${layout.box.d}"D`]);
+    }
+    if (showBoxDims && layout.box) {
+      specRows.push(["Box bottom edge", `${fmt(layout.box.btm)} AFF`]);
+      const bd = layout.box.btm - layout.tvBottom;
+      specRows.push(["Box bottom vs TV bottom", `${fmt(Math.abs(bd))} ${bd >= 0 ? "above" : "below"} TV bottom`]);
+      if (hasFireplace && hasMantel) specRows.push(["Box bottom above mantel", fmt(layout.box.btm - mantelH)]);
+    }
+    if (showTapeOut) {
+      specRows.push(["Tape: top edge", `${fmt(layout.tvTop)} AFF`]);
+      specRows.push(["Tape: bottom edge", `${fmt(layout.tvBottom)} AFF`]);
+      specRows.push(["Tape: left edge", `${fmt(layout.tvLeft)} from left wall`]);
+      specRows.push(["Tape: right edge", `${fmt(layout.tvRight)} from left wall`]);
     }
     if (showOutlet) specRows.push(["Power outlet", `${fmt(layout.outlet.aff)} AFF, ${sideTxt(layout.outlet.x)}`]);
     if (showLowVolt) specRows.push(["Low-voltage feed", `${fmt(layout.lv.aff)} AFF, ${sideTxt(layout.lv.x)}`]);
@@ -1704,6 +1845,17 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
                 <strong>Check rating:</strong> {layout.box.label} is rated for {layout.box.tvMin}"–{layout.box.tvMax}" TVs — selected {selectedSize}". Verify bracket compatibility.
               </div>
             )}
+            <Check on={showBoxDims} onClick={() => setShowBoxDims(!showBoxDims)}>Box rough-in dims (bottom edge)</Check>
+            {mountType === "articulating" && layout?.box?.brand === "Future Automation" && (
+              <>
+                <Check on={showTravel} onClick={() => setShowTravel(!showTravel)}>Show bracket vertical range</Check>
+                {showTravel && (
+                  <Field label="Bracket travel (± in)" hint="FA PS-series hook adjustment — verify with the mount spec sheet">
+                    <input className="inp" type="number" value={bracketTravel} onChange={e => setBracketTravel(e.target.value)}/>
+                  </Field>
+                )}
+              </>
+            )}
           </>
         )}
       </Sec>
@@ -1711,6 +1863,11 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       <Sec icon="plug" title="Electrical">
         <Check on={showOutlet} onClick={() => setShowOutlet(!showOutlet)}>Recessed outlet</Check>
         <Check on={showLowVolt} onClick={() => setShowLowVolt(!showLowVolt)}>Low-voltage feed</Check>
+      </Sec>
+
+      <Sec icon="tv" title="Drawing">
+        <Check on={showTvDims} onClick={() => setShowTvDims(!showTvDims)}>TV W × H dimensions</Check>
+        <Check on={showTapeOut} onClick={() => setShowTapeOut(!showTapeOut)}>Tape-out mode (wall tape lines)</Check>
       </Sec>
 
       {showVesa !== null && (
@@ -1735,7 +1892,10 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     <div className="size-strip-wrap">
       <div className="size-strip-head">
         <span className="strip-title">{showAllSizes ? `ALL ${brand.toUpperCase()} SIZES` : `RECOMMENDED — ${brand.toUpperCase()}`}</span>
-        <button className={`chip ${showAllSizes ? "on" : ""}`} onClick={() => setShowAllSizes(!showAllSizes)}>SHOW ALL</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className={`chip ${showTapeOut ? "on" : ""}`} onClick={() => setShowTapeOut(!showTapeOut)} title="Show the tape lines to mark the TV on the real wall">TAPE-OUT</button>
+          <button className={`chip ${showAllSizes ? "on" : ""}`} onClick={() => setShowAllSizes(!showAllSizes)}>SHOW ALL</button>
+        </div>
       </div>
       <div className="size-strip">
         {(showAllSizes ? TV_CATALOG[brand] : recommendations).map(sz => {
@@ -1774,6 +1934,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
             <span className="sv"><em>CL</em> {fmt(layout.tvCL)}</span>
             <span className="sv"><em>CTR</em> {fmt(layout.centerH)}</span>
             <span className="sv"><em>BTM</em> {fmt(layout.tvBottom)}</span>
+            {showTapeOut && <span className="sv"><em>TOP</em> {fmt(layout.tvTop)}</span>}
+            {showBoxDims && layout.box && <span className="sv"><em>BOX BTM</em> {fmt(layout.box.btm)}</span>}
             {showOutlet && <span className="sv"><em>PWR</em> {fmt(layout.outlet.aff)}</span>}
             {layout.vesa && <span className="sv"><em>VESA</em> {layout.vesa.spec.w_mm}×{layout.vesa.spec.h_mm} {layout.vesa.spec.screw}</span>}
             {layout.box && <span className="sv"><em>BOX</em> {layout.box.label}</span>}
@@ -2073,6 +2235,8 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
                 <div className="stat"><span>Center AFF</span><strong>{fmt(layout.centerH)}</strong></div>
                 <div className="stat"><span>Bottom AFF</span><strong>{fmt(layout.tvBottom)}</strong></div>
                 <div className="stat"><span>TV CL from left</span><strong>{fmt(layout.tvCL)}</strong></div>
+                {showTapeOut && <div className="stat"><span>Top AFF</span><strong>{fmt(layout.tvTop)}</strong></div>}
+                {showBoxDims && layout.box && <div className="stat"><span>Box bottom AFF</span><strong>{fmt(layout.box.btm)}</strong></div>}
                 {showOutlet && <div className="stat"><span>Outlet AFF</span><strong>{fmt(layout.outlet.aff)}</strong></div>}
                 {showLowVolt && <div className="stat"><span>LV AFF</span><strong>{fmt(layout.lv.aff)}</strong></div>}
                 {layout.vesa && <div className="stat"><span>VESA</span><strong>{layout.vesa.spec.w_mm}×{layout.vesa.spec.h_mm} {layout.vesa.spec.screw}</strong></div>}

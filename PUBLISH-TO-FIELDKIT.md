@@ -43,15 +43,15 @@ supersedes it. Recommended: swap in place so the hub URL stays stable.
 
 ## Acceptance checks — do not publish if any fail
 
-- Status-bar badge reads **✓ 39/39** (embedded self-tests; if red the math is
+- Status-bar badge reads **✓ 41/41** (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
-- In the diagnostics panel, run **SWEEP** → **0 failing / ~79 configs**
+- In the diagnostics panel, run **SWEEP** → **0 failing / ~83 configs**
   (label-collision audit).
 - EXPORT → FULL PACK produces a JSON download, a DXF download, and opens the
   PDF print window.
 - Mobile width shows the SETUP / DRAWING / SPECS tabs.
 
-Verified passing on the production build at commit `1f19faf`.
+Verified passing on the production build at commit `1f19faf` (re-verify after recompiling the latest tsx).
 
 ## Gotchas
 
