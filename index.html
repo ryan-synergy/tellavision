@@ -17,168 +17,299 @@
 <div id="root"></div>
 <script>
 const { useState, useMemo, useRef, useEffect } = React;
+// App version. Distinct from the drawing's REV, which is per-project and set
+// by the user in the Project panel. Bump on release and tag the repo to match.
+const APP_VERSION = "2.0.0";
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
 // Domain tables. Sizes in inches unless suffixed _mm.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const TV_CATALOG = {
+// ---------------------------------------------------------------------------
+// Catalog data model: SHIPPED BASELINE + LOCAL OVERLAY.
+//
+// The BASE_* tables below are the versioned, provenance-carrying source of
+// truth and are never written to at runtime. Anything the user changes in the
+// Data screen lands in a separate overlay in localStorage and is merged over
+// the baseline at load. Two reasons this is not just "make the consts
+// editable": an app update can improve the baseline without clobbering local
+// corrections, and every changed row stays identifiable as unverified rather
+// than silently impersonating a spec-sheet figure.
+//
+// The overlay is small (deltas only) and loads synchronously, so the effective
+// tables are ready before anything derives from them.
+const OVERRIDE_KEY = "tellavision-catalog-v1";
+const loadOverlay = () => {
+  try {
+    if (typeof window === "undefined") return {};
+    return JSON.parse(window.localStorage.getItem(OVERRIDE_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+};
+const saveOverlay = ov => {
+  try {
+    window.localStorage.setItem(OVERRIDE_KEY, JSON.stringify(ov));
+  } catch {}
+};
+const clone = v => typeof structuredClone === "function" ? structuredClone(v) : JSON.parse(JSON.stringify(v));
+
+// A table slice is { rows: { key: <full record> }, removed: [keys] }. `rows`
+// holds the complete effective record for anything edited or added, so a diff
+// against the baseline is what marks a row as changed.
+const mergeTable = (base, slice) => {
+  const out = clone(base);
+  if (!slice) return out;
+  (slice.removed || []).forEach(k => {
+    delete out[k];
+  });
+  Object.entries(slice.rows || {}).forEach(([k, v]) => {
+    out[k] = clone(v);
+  });
+  return out;
+};
+const BASE_TV_CATALOG = {
   Sony: [42, 43, 48, 50, 55, 65, 75, 77, 85, 98, 100, 115],
   Samsung: [32, 43, 50, 55, 65, 75, 77, 83, 85, 98, 100, 115],
   LG: [42, 48, 55, 65, 77, 83, 97]
 };
-const BRANDS = Object.keys(TV_CATALOG);
-const BACK_BOXES = {
-  "FA-WB16-2S": {
-    brand: "Future Automation",
-    line: "WB",
-    w: 25.3,
-    h: 16.3,
-    d: 3.8,
-    label: "WB16-2S",
-    bracket: "PS40",
-    tvMin: 32,
-    tvMax: 43
-  },
+
+// Back boxes.
+//
+// Future Automation WB series — verified 2026-08-19 against the manufacturer's
+// own technical sheets (futureautomation.co.uk/Tech/<model>-tech.pdf) and the
+// WB21/26/31-2S installation guide (Tech/wb-2s-instructions.pdf).
+//
+// ORIENTATION MATTERS AND IS EASY TO GET BACKWARDS. The model number is the
+// HEIGHT, not the width, in both families:
+//   * non-2S boxes recess into a SINGLE stud bay, so width is pinned at 353mm
+//     (13.9") to pass between studs at 406mm (16") centres. They are portrait.
+//   * "-2S" boxes span TWIN studs: the install guide gives a cut-out of
+//     762mm [30.0"] WIDE x DIM X high, where DIM X is 540/668/795mm
+//     (21.3/26.3/31.3") for WB21/26/31-2S. They are landscape.
+// So WB21 is 13.9"w x 20.9"h, and WB21-2S is 29.9"w x 21.1"h — same nominal
+// "21" height class, roughly double the width. w/h were transposed here until
+// 2026-08-19; see the studBay self-tests below, which pin this down.
+//
+// w/h/d are the published "Product Dimensions (in wall)" (the box body).
+// Cut-outs run ~2mm larger, and FA requires a MINIMUM cut-out depth of
+// 101.6mm [4.0"] — deeper than the 3.8" box itself.
+//
+// tvMin/tvMax are OUR routing rule (inferred from PS-bracket pairing), NOT
+// published by FA — the only screen range FA states is WB80's 60"-90".
+const BASE_BACK_BOXES = {
+  // single stud bay — 353mm (13.9") wide, fits between 16" o.c. studs
   "FA-WB21": {
     brand: "Future Automation",
     line: "WB",
-    w: 21.9,
-    h: 14.8,
+    w: 13.9,
+    h: 20.9,
     d: 3.8,
     label: "WB21",
     bracket: "PS40",
-    tvMin: 40,
-    tvMax: 55
-  },
-  "FA-WB21-2S": {
-    brand: "Future Automation",
-    line: "WB",
-    w: 21.9,
-    h: 14.8,
-    d: 3.8,
-    label: "WB21-2S (twin stud)",
-    bracket: "PS40",
+    studs: "single",
     tvMin: 40,
     tvMax: 55
   },
   "FA-WB26": {
     brand: "Future Automation",
     line: "WB",
-    w: 26.9,
-    h: 14.8,
+    w: 13.9,
+    h: 26.0,
     d: 3.8,
     label: "WB26",
     bracket: "PS40/PS55",
-    tvMin: 50,
-    tvMax: 65
-  },
-  "FA-WB26-2S": {
-    brand: "Future Automation",
-    line: "WB",
-    w: 26.9,
-    h: 14.8,
-    d: 3.8,
-    label: "WB26-2S (twin stud)",
-    bracket: "PS40/PS55",
+    studs: "single",
     tvMin: 50,
     tvMax: 65
   },
   "FA-WB31": {
     brand: "Future Automation",
     line: "WB",
-    w: 31.9,
-    h: 14.8,
+    w: 13.9,
+    h: 31.0,
     d: 3.8,
     label: "WB31",
     bracket: "PS40/PS55/PS65",
+    studs: "single",
     tvMin: 60,
     tvMax: 75
+  },
+  // twin stud — 762mm (30.0") cut-out across studs at 30" centres
+  "FA-WB16-2S": {
+    brand: "Future Automation",
+    line: "WB",
+    w: 24.6,
+    h: 15.9,
+    d: 3.8,
+    label: "WB16-2S (twin stud)",
+    bracket: "PS32",
+    studs: "twin",
+    tvMin: 32,
+    tvMax: 43
+  },
+  "FA-WB21-2S": {
+    brand: "Future Automation",
+    line: "WB",
+    w: 29.9,
+    h: 21.1,
+    d: 3.8,
+    label: "WB21-2S (twin stud)",
+    bracket: "PS40",
+    studs: "twin",
+    tvMin: 40,
+    tvMax: 55
+  },
+  "FA-WB26-2S": {
+    brand: "Future Automation",
+    line: "WB",
+    w: 29.9,
+    h: 26.2,
+    d: 3.8,
+    label: "WB26-2S (twin stud)",
+    bracket: "PS40/PS55",
+    studs: "twin",
+    tvMin: 50,
+    tvMax: 65
   },
   "FA-WB31-2S": {
     brand: "Future Automation",
     line: "WB",
-    w: 31.9,
-    h: 14.8,
+    w: 29.9,
+    h: 31.2,
     d: 3.8,
     label: "WB31-2S (twin stud)",
     bracket: "PS40/PS55/PS65",
+    studs: "twin",
     tvMin: 60,
     tvMax: 75
   },
+  // WB80 sheet states (WxHxD) explicitly: 1169 x 863 x 97mm, screens 60"-90".
+  // At 46" it spans three bays, not two — its guide calls for three top and
+  // three bottom fixings, so it is "multi", not "twin".
   "FA-WB80": {
     brand: "Future Automation",
     line: "WB",
-    w: 36.0,
-    h: 20.0,
-    d: 5.5,
+    w: 46.0,
+    h: 34.0,
+    d: 3.8,
     label: "WB80",
     bracket: "PS80",
-    tvMin: 75,
-    tvMax: 98
+    studs: "multi",
+    tvMin: 60,
+    tvMax: 90
   },
-  "SB-RBX-8": {
+  // SnapAV Strong VersaBox — verified 2026-08-19 against Snap One's own
+  // installation manuals and dimensioned drawings (snapav.com .../Mounts and
+  // .../StructuredWiring ManualsAndGuides, plus the VersaBox Pro XL cutsheet).
+  //
+  // SAME TRAP AS THE FA LINE: marketing names these "8 x 14", "14 x 14",
+  // "14 x 20" with the HEIGHT first, and the XL was stored here transposed as
+  // 20w x 14h. Every VersaBox is ~14.25" WIDE — they all drop into ONE 16" o.c.
+  // stud bay ("centre the cutout template between the studs"; the manual only
+  // mentions dog ears for studs wider than 16"). Height is what varies.
+  //
+  // Manuals state cutout, drawings state the box shell. w/h below are the box
+  // shell where a drawing exists, cutout where only the manual does (noted);
+  // the two differ by ~0.25", well inside drawing tolerance.
+  //   SM-RBX-8        cutout 14.25 (W) x 8.5 (H)
+  //   SM-RBX-14       cutout 14.0 (W) x 13.25 (H)
+  //   SM-RBX-PRO-8    shell 14.25 x 8.29 x 3.76   (cutout 14.25 x 8.5)
+  //   SM-RBX-PRO-14   shell 14.25 x 13.29 x 3.76  (cutout 14.5 x 13.5)
+  //   SM-RBX-PRO-20   shell 14.25 x 20 x 3.9      (cutout 14.5 x 20.2)
+  // Depth: drawings show a 3.76" shell, Snap One publishes 3.9" — 3.9 kept as
+  // the rough-in figure. tvMin/tvMax are OUR routing rule; Snap One publishes
+  // no screen range for these (the boxes are display-agnostic).
+  "SM-RBX-8": {
+    brand: "SnapAV Strong",
+    line: "VersaBox",
+    w: 14.25,
+    h: 8.5,
+    d: 3.9,
+    label: "VersaBox 8",
+    bracket: "Razor",
+    studs: "single",
+    tvMin: 32,
+    tvMax: 65,
+    note: "Cutout figures — no shell drawing published"
+  },
+  "SM-RBX-14": {
     brand: "SnapAV Strong",
     line: "VersaBox",
     w: 14.0,
-    h: 8.0,
+    h: 13.25,
     d: 3.9,
-    label: "VersaBox 8x14",
+    label: "VersaBox 14",
     bracket: "Razor",
+    studs: "single",
+    tvMin: 50,
+    tvMax: 85,
+    note: "Cutout figures — no shell drawing published"
+  },
+  "SM-RBX-PRO-8": {
+    brand: "SnapAV Strong",
+    line: "VersaBox Pro",
+    w: 14.25,
+    h: 8.29,
+    d: 3.9,
+    label: "VersaBox Pro 8",
+    bracket: "Razor",
+    studs: "single",
     tvMin: 32,
     tvMax: 65
   },
-  "SB-RBX-14": {
+  "SM-RBX-PRO-14": {
     brand: "SnapAV Strong",
-    line: "VersaBox",
-    w: 14.0,
-    h: 14.0,
+    line: "VersaBox Pro",
+    w: 14.25,
+    h: 13.29,
     d: 3.9,
-    label: "VersaBox 14x14",
+    label: "VersaBox Pro 14",
     bracket: "Razor",
+    studs: "single",
     tvMin: 50,
     tvMax: 85
   },
-  "SB-RBX-PRO-8": {
+  "SM-RBX-PRO-20": {
     brand: "SnapAV Strong",
     line: "VersaBox Pro",
-    w: 14.0,
-    h: 8.0,
+    w: 14.25,
+    h: 20.0,
     d: 3.9,
-    label: "VersaBox Pro 8x14",
+    label: "VersaBox Pro XL",
     bracket: "Razor",
-    tvMin: 32,
-    tvMax: 65
-  },
-  "SB-RBX-PRO-14": {
-    brand: "SnapAV Strong",
-    line: "VersaBox Pro",
-    w: 14.0,
-    h: 14.0,
-    d: 3.9,
-    label: "VersaBox Pro 14x14",
-    bracket: "Razor",
-    tvMin: 50,
-    tvMax: 85
-  },
-  "SB-RBX-PRO-XL": {
-    brand: "SnapAV Strong",
-    line: "VersaBox Pro",
-    w: 20.0,
-    h: 14.0,
-    d: 3.9,
-    label: "VersaBox Pro XL 14x20",
-    bracket: "Razor",
+    studs: "single",
     tvMin: 65,
     tvMax: 98,
-    note: "Fits Samsung One Connect 8K"
+    note: "Fits Samsung One Connect 8K (15.5 x 7 x 3.2)"
   }
+};
+
+// Framing the boxes have to survive, in inches of clear opening.
+const STUD_CLEAR = {
+  single: 16 - 1.5,
+  // 16" o.c. less one 2x4 -> 14.5" clear
+  twin: 16 * 2 - 1.5,
+  // centre stud removed -> 30.5" clear (FA cut-out 30.0")
+  multi: 16 * 3 - 1.5 // two studs removed -> 46.5" clear (WB80 is 46.0")
 };
 
 // SANUS Black Series (Legrand AV, doc SANBLK0919) — specs from the user's
 // catalog JSON. plateW/plateH from product dimensions (min of ranges);
 // vesaMax parsed W×H mm. depth = profile off wall; ext = full-motion reach.
-const SANUS_MOUNTS = {
+// The VersaBox keys used to be invented ("SB-RBX-*"); real Snap One SKUs are
+// "SM-RBX-*". Saved designs and previously exported JSON still carry the old
+// ones, so map them forward rather than silently falling back to a default box.
+const LEGACY_BOX_KEYS = {
+  "SB-RBX-8": "SM-RBX-8",
+  "SB-RBX-14": "SM-RBX-14",
+  "SB-RBX-PRO-8": "SM-RBX-PRO-8",
+  "SB-RBX-PRO-14": "SM-RBX-PRO-14",
+  "SB-RBX-PRO-XL": "SM-RBX-PRO-20"
+};
+const canonBoxKey = k => LEGACY_BOX_KEYS[k] || k;
+const BASE_SANUS_MOUNTS = {
   "S-CILF230": {
     model: "CILF230-G1",
     name: "Large Full Motion",
@@ -300,12 +431,12 @@ const SANUS_MOUNTS = {
     list: 199.99
   }
 };
-const SANUS_STYLE_ORDER = {
+const BASE_SANUS_STYLE_ORDER = {
   fixed: ["S-CILL1", "S-CILL2"],
   tilt: ["S-CILT1", "S-CILT2", "S-CIXT1"],
   fullmotion: ["S-CILF226", "S-CILF230"]
 };
-const VESA_DATA = {
+const BASE_VESA_DATA = {
   Sony: {
     42: {
       w_mm: 100,
@@ -520,21 +651,26 @@ const ABBREVIATIONS = [["AFF", "above finished floor"], ["CL", "centerline"], ["
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Gap between TV bottom edge and mantel top / firebox opening top, in inches.
-const CLEARANCE = {
+const BASE_CLEARANCE = {
   mantel: 8,
   noMantel: 10
 };
 
 // 16:9 panel + ~1.2" bezel allowance. Constants are 16/sqrt(337), 9/sqrt(337).
+const BASE_FORMULA = {
+  wCoef: 0.872,
+  hCoef: 0.490,
+  bezel: 1.2
+};
 const tvDims = size => ({
-  w: size * 0.872 + 1.2,
-  h: size * 0.490 + 1.2
+  w: size * FORMULA.wCoef + FORMULA.bezel,
+  h: size * FORMULA.hCoef + FORMULA.bezel
 });
 
 // Exact panel data from manufacturer spec sheets (set WITHOUT stand).
 // When present these REPLACE the 16:9 formula in every calculation, and
 // weightLbs feeds the mount capacity check automatically.
-const TV_OVERRIDES = {
+const BASE_TV_OVERRIDES = {
   Samsung: {
     115: {
       w: 101.2,
@@ -554,6 +690,83 @@ const TV_OVERRIDES = {
     }
   }
 };
+
+// ---- effective catalog = baseline + overlay -------------------------------
+// These are `let` on purpose: the Data screen reassigns them through
+// applyOverlay() so an edit takes effect without a reload. Everything
+// downstream reads them at call time, never captures them at module init —
+// BRANDS is derived here for the same reason.
+const CATALOG_TABLES = {
+  TV_CATALOG: {
+    base: () => BASE_TV_CATALOG,
+    nested: "list"
+  },
+  BACK_BOXES: {
+    base: () => BASE_BACK_BOXES,
+    nested: "record"
+  },
+  SANUS_MOUNTS: {
+    base: () => BASE_SANUS_MOUNTS,
+    nested: "record"
+  },
+  SANUS_STYLE_ORDER: {
+    base: () => BASE_SANUS_STYLE_ORDER,
+    nested: "list"
+  },
+  VESA_DATA: {
+    base: () => BASE_VESA_DATA,
+    nested: "nested2"
+  },
+  TV_OVERRIDES: {
+    base: () => BASE_TV_OVERRIDES,
+    nested: "nested2"
+  },
+  CLEARANCE: {
+    base: () => BASE_CLEARANCE,
+    nested: "scalars"
+  },
+  FORMULA: {
+    base: () => BASE_FORMULA,
+    nested: "scalars"
+  }
+};
+let OVERLAY = loadOverlay();
+let TV_CATALOG, BACK_BOXES, SANUS_MOUNTS, SANUS_STYLE_ORDER, VESA_DATA, TV_OVERRIDES, CLEARANCE, FORMULA, BRANDS;
+const applyOverlay = ov => {
+  OVERLAY = ov || {};
+  TV_CATALOG = mergeTable(BASE_TV_CATALOG, OVERLAY.TV_CATALOG);
+  BACK_BOXES = mergeTable(BASE_BACK_BOXES, OVERLAY.BACK_BOXES);
+  SANUS_MOUNTS = mergeTable(BASE_SANUS_MOUNTS, OVERLAY.SANUS_MOUNTS);
+  SANUS_STYLE_ORDER = mergeTable(BASE_SANUS_STYLE_ORDER, OVERLAY.SANUS_STYLE_ORDER);
+  VESA_DATA = mergeTable(BASE_VESA_DATA, OVERLAY.VESA_DATA);
+  TV_OVERRIDES = mergeTable(BASE_TV_OVERRIDES, OVERLAY.TV_OVERRIDES);
+  CLEARANCE = mergeTable(BASE_CLEARANCE, OVERLAY.CLEARANCE);
+  FORMULA = mergeTable(BASE_FORMULA, OVERLAY.FORMULA);
+  BRANDS = Object.keys(TV_CATALOG);
+  return OVERLAY;
+};
+applyOverlay(OVERLAY);
+
+// Which rows differ from what shipped — drives the "edited" badges in the UI.
+const overlayDiff = () => {
+  const out = {};
+  Object.entries(CATALOG_TABLES).forEach(([id, meta]) => {
+    const slice = OVERLAY[id] || {};
+    const added = [],
+      edited = [];
+    Object.keys(slice.rows || {}).forEach(k => {
+      (k in meta.base() ? edited : added).push(k);
+    });
+    const removed = (slice.removed || []).filter(k => k in meta.base());
+    if (added.length || edited.length || removed.length) out[id] = {
+      added,
+      edited,
+      removed
+    };
+  });
+  return out;
+};
+const overlayCount = () => Object.values(overlayDiff()).reduce((n, d) => n + d.added.length + d.edited.length + d.removed.length, 0);
 const tvDimsFor = (brand, size) => {
   const o = TV_OVERRIDES[brand]?.[size];
   return o ? {
@@ -572,10 +785,10 @@ const recommendBackBox = (tvSize, mountSystem, brand) => {
     if (tvSize <= 75) return "FA-WB31";
     return "FA-WB80";
   }
-  if (samsung8K) return "SB-RBX-PRO-XL";
-  if (tvSize <= 55) return "SB-RBX-PRO-8";
-  if (tvSize > 85) return "SB-RBX-PRO-XL";
-  return "SB-RBX-PRO-14";
+  if (samsung8K) return "SM-RBX-PRO-20";
+  if (tvSize <= 55) return "SM-RBX-PRO-8";
+  if (tvSize > 85) return "SM-RBX-PRO-20";
+  return "SM-RBX-PRO-14";
 };
 
 // Pick the Sanus Black mount for a TV size + style. Walks the style's
@@ -910,6 +1123,488 @@ const buildPartsList = ({
   return rows;
 };
 
+// --- reference underlay (imported PDF / image elevation) -----------------
+// The underlay lives in wall-inch space, never screen pixels: `ppi` is bitmap
+// pixels per real inch, and (ox, oy) is the image's top-left corner — ox inches
+// right of the wall's left edge, oy inches above the floor. Keeping it in world
+// units is what lets calibration survive a window resize, a mobile/desktop
+// scale change, and the separate print render.
+//
+//   native px -> wall inches:  x = ox + px / ppi ,  y = oy - py / ppi
+//   wall inches -> native px:  px = (x - ox) * ppi , py = (oy - y) * ppi
+const UNDERLAY_MAX_PX = 1800; // long-side cap for a rendered page bitmap
+const UNDERLAY_JPEG_Q = 0.82;
+const PDFJS_VERSION = "3.11.174"; // last UMD build — matches the app's no-bundler setup
+const PDFJS_SRC = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.min.js`;
+const PDFJS_WORKER = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.worker.min.js`;
+
+// Field input: accepts 96, 96", 8', 8'6", 8' 6 1/2", 6 1/2
+const parseLenIn = raw => {
+  if (raw == null) return NaN;
+  const t = String(raw).trim().replace(/[\u2013\u2014]/g, "-").replace(/\u2019/g, "'").replace(/\u201D/g, '"');
+  if (!t) return NaN;
+  const m = t.match(/^(?:(\d+(?:\.\d+)?)\s*'\s*)?(?:(\d+(?:\.\d+)?)\s*)?(?:(\d+)\s*\/\s*(\d+)\s*)?"?$/);
+  if (!m) return NaN;
+  const ft = m[1] ? parseFloat(m[1]) : 0;
+  const inch = m[2] ? parseFloat(m[2]) : 0;
+  const frac = m[3] && m[4] && parseFloat(m[4]) ? parseFloat(m[3]) / parseFloat(m[4]) : 0;
+  const v = ft * 12 + inch + frac;
+  return v > 0 ? v : NaN;
+};
+const underlayInW = u => u.natW / u.ppi;
+const underlayInH = u => u.natH / u.ppi;
+
+// Drop a freshly imported bitmap onto the wall at a sane starting size. Fit to
+// the wall (contain) so it is always on screen — the user calibrates from there.
+const fitUnderlay = (natW, natH, wallW, wallH) => {
+  const w = Math.max(wallW || 1, 1),
+    h = Math.max(wallH || 1, 1);
+  const ppi = Math.max(natW / w, natH / h);
+  return {
+    ppi,
+    ox: (w - natW / ppi) / 2,
+    oy: (h + natH / ppi) / 2
+  };
+};
+
+// Rescale by `k` about a fixed anchor (wall inches) so the point under the
+// user's first click does not slide out from under them while the image resizes.
+// k > 1 means the drawing represents MORE inches than we currently think.
+const rescaleUnderlay = (u, k, anchor) => {
+  if (!u || !(k > 0) || !isFinite(k)) return u;
+  return {
+    ...u,
+    ppi: u.ppi / k,
+    ox: anchor.x - (anchor.x - u.ox) * k,
+    oy: anchor.y - (anchor.y - u.oy) * k
+  };
+};
+
+// Two-point calibration: user clicks across a known dimension and types its
+// true length. Anchored on p1.
+const calibrateTwoPoint = (u, p1, p2, trueIn) => {
+  const measured = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  if (!u || !(measured > 1e-6) || !(trueIn > 0)) return null;
+  return rescaleUnderlay(u, trueIn / measured, p1);
+};
+
+// Snap-to-object: user boxes the TV drawn on the imported elevation. Its real
+// width is known from the catalog, so one gesture sets the scale AND parks the
+// underlay so the drawn TV lands under the app's TV.
+const calibrateToBox = (u, box, realW, target) => {
+  const measured = Math.abs(box.x2 - box.x1);
+  if (!u || !(measured > 1e-6) || !(realW > 0)) return null;
+  const anchor = {
+    x: (box.x1 + box.x2) / 2,
+    y: (box.y1 + box.y2) / 2
+  };
+  const scaled = rescaleUnderlay(u, realW / measured, anchor);
+  if (!target) return scaled;
+  return {
+    ...scaled,
+    ox: scaled.ox + (target.x - anchor.x),
+    oy: scaled.oy + (target.y - anchor.y)
+  };
+};
+
+// --- markup layer --------------------------------------------------------
+// Every point is stored in wall inches for the same reason as the underlay.
+const MARKUP_TOOLS = ["select", "mask", "pen", "line", "arrow", "rect", "text", "measure"];
+const MARKUP_COLORS = ["#FF3B30", "#FFB000", "#00D68F", "#4A9EFF", "#FFFFFF", "#111111"];
+const MARKUP_WIDTHS = [1, 2, 3.5];
+
+// Pen strokes arrive at pointer-event density; thin them before they hit
+// localStorage. Perpendicular-distance decimation, tolerance in inches.
+const simplifyPts = (pts, tol = 0.25) => {
+  if (!pts || pts.length < 3) return pts || [];
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = out[out.length - 1],
+      b = pts[i],
+      c = pts[i + 1];
+    const dx = c.x - a.x,
+      dy = c.y - a.y;
+    const len = Math.hypot(dx, dy);
+    const d = len < 1e-9 ? Math.hypot(b.x - a.x, b.y - a.y) : Math.abs((b.x - a.x) * dy - (b.y - a.y) * dx) / len;
+    if (d > tol) out.push(b);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+};
+
+// --- picking and editing existing markup ---------------------------------
+// All of this works in wall inches; the caller converts a pixel tolerance so
+// the grab radius feels identical however the drawing is scaled.
+const distToSeg = (p, a, b) => {
+  const dx = b.x - a.x,
+    dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+};
+const rectCorners = (a, b) => {
+  const x1 = Math.min(a.x, b.x),
+    x2 = Math.max(a.x, b.x);
+  const y1 = Math.min(a.y, b.y),
+    y2 = Math.max(a.y, b.y);
+  return [{
+    x: x1,
+    y: y1
+  }, {
+    x: x2,
+    y: y1
+  }, {
+    x: x2,
+    y: y2
+  }, {
+    x: x1,
+    y: y2
+  }];
+};
+
+// Topmost hit wins, matching what the user sees stacked on screen.
+const hitMarkup = (items, q, tol) => {
+  for (let i = (items || []).length - 1; i >= 0; i--) {
+    const m = items[i],
+      pts = m && m.pts || [];
+    if (!pts.length) continue;
+    if (m.type === "text") {
+      if (Math.hypot(q.x - pts[0].x, q.y - pts[0].y) <= Math.max(tol, 2.5)) return i;
+      continue;
+    }
+    if (m.type === "mask") {
+      // filled, so anywhere inside it is a hit — unlike an outline box
+      const c = rectCorners(pts[0], pts[pts.length - 1]);
+      if (q.x >= c[0].x - tol && q.x <= c[2].x + tol && q.y >= c[0].y - tol && q.y <= c[2].y + tol) return i;
+      continue;
+    }
+    if (m.type === "rect") {
+      const c = rectCorners(pts[0], pts[pts.length - 1]);
+      if ([[0, 1], [1, 2], [2, 3], [3, 0]].some(([u, v]) => distToSeg(q, c[u], c[v]) <= tol)) return i;
+      continue;
+    }
+    for (let j = 1; j < pts.length; j++) if (distToSeg(q, pts[j - 1], pts[j]) <= tol) return i;
+    if (pts.length === 1 && Math.hypot(q.x - pts[0].x, q.y - pts[0].y) <= tol) return i;
+  }
+  return -1;
+};
+
+// Grab points. A box shows all four corners even though only two are stored;
+// a pen stroke and a text label are move-only (reshaping them handle-by-handle
+// would be worse than redrawing).
+const handlesFor = m => {
+  if (!m || !m.pts || !m.pts.length) return [];
+  if (m.type === "text" || m.type === "pen") return [];
+  if (m.type === "rect" || m.type === "mask") return rectCorners(m.pts[0], m.pts[m.pts.length - 1]).map((p, i) => ({
+    ...p,
+    ix: i
+  }));
+  return m.pts.map((p, i) => ({
+    ...p,
+    ix: i
+  }));
+};
+const moveHandle = (m, ix, q) => {
+  if (m.type === "rect" || m.type === "mask") {
+    const a = {
+        ...m.pts[0]
+      },
+      b = {
+        ...m.pts[m.pts.length - 1]
+      };
+    // corners run clockwise from top-left of the normalised box
+    if (ix === 0) {
+      a.x = q.x;
+      a.y = q.y;
+    } else if (ix === 1) {
+      b.x = q.x;
+      a.y = q.y;
+    } else if (ix === 2) {
+      b.x = q.x;
+      b.y = q.y;
+    } else {
+      a.x = q.x;
+      b.y = q.y;
+    }
+    return {
+      ...m,
+      pts: [a, b]
+    };
+  }
+  return {
+    ...m,
+    pts: m.pts.map((p, i) => i === ix ? {
+      x: q.x,
+      y: q.y
+    } : p)
+  };
+};
+
+// --- snapping --------------------------------------------------------------
+// Snaps to things that MEAN something on this drawing rather than an arbitrary
+// grid, so "measure from the TV edge to the wall" lands exactly and the number
+// can be trusted. Each axis snaps independently, then 2-point shapes get an
+// ortho lock so a dimension stays truly horizontal or vertical.
+const snapAnchors = (layout, wallW, wallH) => {
+  const xs = [{
+    v: 0,
+    why: "wall left"
+  }, {
+    v: wallW,
+    why: "wall right"
+  }, {
+    v: wallW / 2,
+    why: "wall centre"
+  }];
+  const ys = [{
+    v: 0,
+    why: "floor"
+  }, {
+    v: wallH,
+    why: "ceiling"
+  }];
+  if (layout) {
+    xs.push({
+      v: layout.tvLeft,
+      why: "TV left"
+    }, {
+      v: layout.tvRight,
+      why: "TV right"
+    }, {
+      v: layout.tvCL,
+      why: "TV centreline"
+    });
+    ys.push({
+      v: layout.tvTop,
+      why: "TV top"
+    }, {
+      v: layout.tvBottom,
+      why: "TV bottom"
+    }, {
+      v: layout.centerH,
+      why: "TV centre"
+    });
+    if (layout.box) {
+      xs.push({
+        v: layout.box.cx - layout.box.w / 2,
+        why: "box left"
+      }, {
+        v: layout.box.cx + layout.box.w / 2,
+        why: "box right"
+      });
+      ys.push({
+        v: layout.box.btm,
+        why: "box bottom"
+      }, {
+        v: layout.box.aff + layout.box.h / 2,
+        why: "box top"
+      });
+    }
+    if (layout.outlet) ys.push({
+      v: layout.outlet.aff,
+      why: "outlet"
+    });
+  }
+  return {
+    xs,
+    ys
+  };
+};
+const nearest = (list, v, tol) => {
+  let best = null;
+  list.forEach(a => {
+    const d = Math.abs(a.v - v);
+    if (d <= tol && (!best || d < best.d)) best = {
+      ...a,
+      d
+    };
+  });
+  return best;
+};
+
+// Returns { x, y, hitX, hitY } — the hits drive the on-screen "why did it jump"
+// guides. `other` is the far end of a 2-point shape, used for the ortho lock.
+const snapPoint = (q, anchors, tol, other) => {
+  const hx = nearest(anchors.xs, q.x, tol);
+  const hy = nearest(anchors.ys, q.y, tol);
+  let x = hx ? hx.v : q.x,
+    y = hy ? hy.v : q.y;
+  let orthoX = null,
+    orthoY = null;
+  if (other) {
+    if (!hy && Math.abs(y - other.y) <= tol) {
+      y = other.y;
+      orthoY = true;
+    }
+    if (!hx && Math.abs(x - other.x) <= tol) {
+      x = other.x;
+      orthoX = true;
+    }
+  }
+  return {
+    x,
+    y,
+    hitX: hx,
+    hitY: hy,
+    orthoX,
+    orthoY
+  };
+};
+const translateMarkup = (m, dx, dy) => ({
+  ...m,
+  pts: m.pts.map(p => ({
+    x: p.x + dx,
+    y: p.y + dy
+  }))
+});
+
+// Where a measure's label sits: offset along the line's NORMAL so it never
+// lands on its own shaft. A vertical measure used to centre the text on the
+// line and read as struck through.
+const measureLabelPos = (x1, y1, x2, y2, off = 13) => {
+  const ang = Math.atan2(y2 - y1, x2 - x1);
+  return {
+    x: (x1 + x2) / 2 + Math.cos(ang - Math.PI / 2) * off,
+    y: (y1 + y2) / 2 + Math.sin(ang - Math.PI / 2) * off
+  };
+};
+const markupSpan = m => {
+  const p = m && m.pts;
+  if (!p || p.length < 2) return 0;
+  return Math.hypot(p[p.length - 1].x - p[0].x, p[p.length - 1].y - p[0].y);
+};
+
+// --- offline bitmap store ------------------------------------------------
+// A rendered page is 1-3 MB; localStorage (already holding the design) caps at
+// ~5 MB, so the bitmap goes to IndexedDB and only its calibration rides along
+// in the design JSON.
+const IDB_NAME = "tellavision";
+const IDB_STORE = "underlay";
+const idbOpen = () => new Promise((res, rej) => {
+  if (typeof indexedDB === "undefined") return rej(new Error("no indexedDB"));
+  const rq = indexedDB.open(IDB_NAME, 1);
+  rq.onupgradeneeded = () => {
+    if (!rq.result.objectStoreNames.contains(IDB_STORE)) rq.result.createObjectStore(IDB_STORE);
+  };
+  rq.onsuccess = () => res(rq.result);
+  rq.onerror = () => rej(rq.error);
+});
+const idbSet = async (key, val) => {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(val, key);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+};
+const idbGet = async key => {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const rq = tx.objectStore(IDB_STORE).get(key);
+    rq.onsuccess = () => res(rq.result || null);
+    rq.onerror = () => rej(rq.error);
+  });
+};
+const idbDel = async key => {
+  const db = await idbOpen();
+  return new Promise(res => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => res(false);
+  });
+};
+
+// --- PDF rasterisation ---------------------------------------------------
+// pdf.js is injected on first import only, so users who never import a drawing
+// pay nothing. The service worker pre-caches it alongside React.
+let pdfjsPromise = null;
+const loadPdfJs = () => {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfjsPromise) return pdfjsPromise;
+  pdfjsPromise = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = PDFJS_SRC;
+    s.onload = () => {
+      if (!window.pdfjsLib) return rej(new Error("pdf.js loaded but did not register"));
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      res(window.pdfjsLib);
+    };
+    s.onerror = () => {
+      pdfjsPromise = null;
+      rej(new Error("Could not load the PDF engine — connect once to cache it for offline use"));
+    };
+    document.head.appendChild(s);
+  });
+  return pdfjsPromise;
+};
+
+// Render one page to a capped-resolution JPEG. Returns { src, natW, natH, pages }.
+const rasterizePdfPage = async (arrayBuf, pageNum = 1) => {
+  const pdfjsLib = await loadPdfJs();
+  const doc = await pdfjsLib.getDocument({
+    data: arrayBuf
+  }).promise;
+  const pages = doc.numPages;
+  const page = await doc.getPage(Math.min(Math.max(pageNum, 1), pages));
+  const base = page.getViewport({
+    scale: 1
+  });
+  const scale = Math.min(UNDERLAY_MAX_PX / Math.max(base.width, base.height), 4);
+  const viewport = page.getViewport({
+    scale
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({
+    canvasContext: ctx,
+    viewport
+  }).promise;
+  return {
+    src: canvas.toDataURL("image/jpeg", UNDERLAY_JPEG_Q),
+    natW: canvas.width,
+    natH: canvas.height,
+    pages
+  };
+};
+
+// Images (a phone photo of a printed elevation, or a screenshot) take the same
+// path — downscaled to the same cap so storage behaves identically.
+const rasterizeImageFile = file => new Promise((res, rej) => {
+  const reader = new FileReader();
+  reader.onerror = () => rej(new Error("Could not read that image"));
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => rej(new Error("Could not decode that image"));
+    img.onload = () => {
+      const k = Math.min(1, UNDERLAY_MAX_PX / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(Math.round(img.width * k), 1);
+      canvas.height = Math.max(Math.round(img.height * k), 1);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      res({
+        src: canvas.toDataURL("image/jpeg", UNDERLAY_JPEG_Q),
+        natW: canvas.width,
+        natH: canvas.height,
+        pages: 1
+      });
+    };
+    img.src = String(reader.result);
+  };
+  reader.readAsDataURL(file);
+});
+
 // --- persistence ---
 const STORAGE_KEY = "tellavision-v1";
 const LEGACY_STORAGE_KEY = "tv-wall-planner-v1"; // pre-rename designs migrate on load
@@ -982,7 +1677,7 @@ const buildExportJSON = (design, layout) => ({
 // R12 ASCII DXF: the most universally importable CAD format. Geometry is at
 // TRUE SCALE in inches — origin at the left wall edge on the floor, Y up —
 // which is exactly the engine's coordinate system (X from left, AFF up).
-const DXF_LAYERS = [["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2], ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30], ["DIMENSIONS", 7], ["CENTERLINE", 1], ["TAPEOUT", 5], ["NOTES", 7]];
+const DXF_LAYERS = [["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2], ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30], ["DIMENSIONS", 7], ["CENTERLINE", 1], ["TAPEOUT", 5], ["NOTES", 7], ["MARKUP", 1]];
 const buildDXF = (S, layout) => {
   if (!layout) return null;
   const fmt = v => fmtIn(v, S.dispUnits);
@@ -1191,7 +1886,239 @@ const buildDXF = (S, layout) => {
   text("NOTES", 0, -22, 1.5, `REV ${S.revision || "01"} - UNITS: INCHES - NOT TO SCALE, DIMENSIONS GOVERN`);
   P(0, "ENDSEC");
   P(0, "EOF");
+  // Hand markup rides along on its own layer at true scale. The raster
+  // underlay has no DXF equivalent, so it is deliberately left behind.
+  (S.markup || []).forEach(m => {
+    const pts = m && m.pts;
+    if (!pts || !pts.length) return;
+    const a = pts[0],
+      b = pts[pts.length - 1];
+    if (m.type === "pen") {
+      for (let i = 1; i < pts.length; i++) line("MARKUP", pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    } else if (m.type === "rect") {
+      rect("MARKUP", Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+    } else if (m.type === "text") {
+      text("MARKUP", a.x, a.y, 2, m.text || "");
+    } else if (m.type === "measure") {
+      line("MARKUP", a.x, a.y, b.x, b.y);
+      text("MARKUP", (a.x + b.x) / 2, (a.y + b.y) / 2 + 1, 2, fmt(Math.hypot(b.x - a.x, b.y - a.y)));
+    } else {
+      line("MARKUP", a.x, a.y, b.x, b.y); // line + arrow share the shaft
+    }
+  });
   return out.join("\r\n");
+};
+
+// ---------------------------------------------------------------------------
+// Data screen schemas. One entry per catalog table describes its shape, its
+// columns and its rules, and a single generic grid renders all of them — so
+// adding a table later is a schema entry, not a new screen.
+//
+// kind:
+//   record   key -> flat object            (BACK_BOXES, SANUS_MOUNTS)
+//   list     key -> array of numbers       (TV_CATALOG, SANUS_STYLE_ORDER)
+//   nested2  key -> key2 -> flat object    (VESA_DATA, TV_OVERRIDES)
+//   scalars  single flat object            (CLEARANCE, FORMULA)
+const N = (k, label, unit, opt) => ({
+  k,
+  label,
+  t: "num",
+  unit,
+  ...(opt || {})
+});
+const S_ = (k, label, opt) => ({
+  k,
+  label,
+  t: "text",
+  ...(opt || {})
+});
+const TABLE_SCHEMAS = [{
+  id: "BACK_BOXES",
+  title: "Back Boxes",
+  kind: "record",
+  keyLabel: "SKU",
+  hint: "Future Automation WB dimensions verified 2026-08-19 from manufacturer tech sheets. Width is the horizontal dimension in the wall — non-2S boxes are portrait so they pass between studs.",
+  cols: [S_("brand", "Brand"), S_("label", "Label"), S_("line", "Line"), N("w", "Width", "in"), N("h", "Height", "in"), N("d", "Depth", "in"), S_("bracket", "Bracket"), {
+    k: "studs",
+    label: "Framing",
+    t: "enum",
+    options: ["single", "twin", "multi"]
+  }, N("tvMin", "TV min", "in"), N("tvMax", "TV max", "in")],
+  blank: {
+    brand: "Custom",
+    label: "New box",
+    line: "",
+    w: 14,
+    h: 14,
+    d: 3.8,
+    bracket: "",
+    studs: "single",
+    tvMin: 40,
+    tvMax: 65
+  },
+  validate: (row, key, all) => {
+    const e = [];
+    ["w", "h", "d"].forEach(k => {
+      if (!(row[k] > 0)) e.push([k, "must be greater than 0"]);
+    });
+    if (!(row.tvMax > row.tvMin)) e.push(["tvMax", "must exceed TV min"]);
+    const clear = STUD_CLEAR[row.studs];
+    if (clear && row.w > clear) e.push(["w", `${row.w}" will not fit ${row.studs} framing (${clear}" clear)`]);
+    if (/-2S$/.test(key)) {
+      const base = all[key.replace(/-2S$/, "")];
+      if (base && !(row.w > base.w)) e.push(["w", "a twin-stud box must be wider than its single-stud sibling"]);
+    }
+    return e;
+  }
+}, {
+  id: "SANUS_MOUNTS",
+  title: "Mounts",
+  kind: "record",
+  keyLabel: "SKU",
+  hint: "Sanus in-ceiling/in-wall mount ladder. Not spec-sheet verified.",
+  cols: [S_("model", "Model"), S_("name", "Name"), {
+    k: "style",
+    label: "Style",
+    t: "enum",
+    options: ["fixed", "tilt", "fullmotion"]
+  }, N("tvMin", "TV min", "in"), N("tvMax", "TV max", "in"), N("capLbs", "Capacity", "lb"), N("vesaMaxW", "VESA max W", "mm"), N("vesaMaxH", "VESA max H", "mm"), N("plateW", "Plate W", "in"), N("plateH", "Plate H", "in"), N("depth", "Depth", "in"), N("ext", "Extension", "in"), N("list", "List", "$")],
+  blank: {
+    model: "NEW-1",
+    name: "Custom mount",
+    style: "fixed",
+    tvMin: 40,
+    tvMax: 85,
+    capLbs: 150,
+    vesaMaxW: 600,
+    vesaMaxH: 400,
+    plateW: 30,
+    plateH: 18,
+    depth: 1.5,
+    ext: null,
+    list: 0
+  },
+  validate: row => {
+    const e = [];
+    if (!(row.tvMax > row.tvMin)) e.push(["tvMax", "must exceed TV min"]);
+    if (!(row.capLbs > 0)) e.push(["capLbs", "must be greater than 0"]);
+    ["vesaMaxW", "vesaMaxH", "plateW", "plateH"].forEach(k => {
+      if (!(row[k] > 0)) e.push([k, "must be greater than 0"]);
+    });
+    return e;
+  }
+}, {
+  id: "VESA_DATA",
+  title: "VESA Patterns",
+  kind: "nested2",
+  keyLabel: "Brand",
+  key2Label: "Size",
+  hint: "Mounting pattern per brand and screen size. voffset_pct biases the pattern up or down from the panel centre (OLEDs often sit low).",
+  cols: [N("w_mm", "Pattern W", "mm"), N("h_mm", "Pattern H", "mm"), S_("screw", "Screw"), N("voffset_pct", "V offset", "%"), S_("note", "Note")],
+  blank: {
+    w_mm: 400,
+    h_mm: 400,
+    screw: "M8",
+    voffset_pct: 0
+  },
+  validate: row => {
+    const e = [];
+    if (!(row.w_mm > 0)) e.push(["w_mm", "must be greater than 0"]);
+    if (!(row.h_mm > 0)) e.push(["h_mm", "must be greater than 0"]);
+    if (!row.screw) e.push(["screw", "required"]);
+    if (Math.abs(row.voffset_pct || 0) > 25) e.push(["voffset_pct", "beyond +/-25% looks wrong"]);
+    return e;
+  }
+}, {
+  id: "TV_OVERRIDES",
+  title: "Exact Panels",
+  kind: "nested2",
+  keyLabel: "Brand",
+  key2Label: "Size",
+  hint: "Real spec-sheet panel dimensions (no stand). When present these REPLACE the 16:9 formula everywhere, and weight feeds the mount capacity check.",
+  cols: [N("w", "Panel W", "in"), N("h", "Panel H", "in"), N("d", "Depth", "in"), N("weightLbs", "Weight", "lb"), S_("model", "Model")],
+  blank: {
+    w: 0,
+    h: 0,
+    d: 1.5,
+    weightLbs: 0,
+    model: ""
+  },
+  validate: row => {
+    const e = [];
+    if (!(row.w > 0)) e.push(["w", "must be greater than 0"]);
+    if (!(row.h > 0)) e.push(["h", "must be greater than 0"]);
+    if (row.w && row.h && (row.w / row.h < 1.2 || row.w / row.h > 2.6)) e.push(["h", "aspect ratio looks wrong"]);
+    return e;
+  }
+}, {
+  id: "TV_CATALOG",
+  title: "TV Sizes",
+  kind: "list",
+  keyLabel: "Brand",
+  hint: "Screen sizes offered per brand, in inches. Comma separated.",
+  validate: arr => {
+    const e = [];
+    if (!arr.length) e.push(["list", "at least one size required"]);
+    if (arr.some(v => !(v > 0))) e.push(["list", "sizes must be positive numbers"]);
+    if (new Set(arr).size !== arr.length) e.push(["list", "duplicate sizes"]);
+    return e;
+  }
+}, {
+  id: "SANUS_STYLE_ORDER",
+  title: "Mount Ladder",
+  kind: "list",
+  keyLabel: "Style",
+  text: true,
+  hint: "Preference order the recommender walks for each style — cheapest acceptable first. Values are mount SKUs.",
+  validate: (arr, key, all, ctx) => {
+    const e = [];
+    arr.forEach(k => {
+      if (!ctx.SANUS_MOUNTS[k]) e.push(["list", `unknown mount SKU: ${k}`]);
+    });
+    return e;
+  }
+}, {
+  id: "CLEARANCE",
+  title: "Clearances",
+  kind: "scalars",
+  hint: "Vertical gap held above a fireplace or mantel, in inches.",
+  cols: [N("mantel", "Above mantel", "in"), N("noMantel", "Above firebox", "in")],
+  validate: row => Object.entries(row).filter(([, v]) => !(v > 0)).map(([k]) => [k, "must be greater than 0"])
+}, {
+  id: "FORMULA",
+  title: "Size Formula",
+  kind: "scalars",
+  hint: "16:9 panel estimate used when no exact panel is listed: width = size x wCoef + bezel. Defaults are 16/sqrt(337) and 9/sqrt(337). Changing these shifts EVERY drawing that has no exact-panel entry.",
+  cols: [N("wCoef", "Width coefficient"), N("hCoef", "Height coefficient"), N("bezel", "Bezel allowance", "in")],
+  validate: row => {
+    const e = [];
+    if (!(row.wCoef > 0.5 && row.wCoef < 1.2)) e.push(["wCoef", "expected roughly 0.87"]);
+    if (!(row.hCoef > 0.3 && row.hCoef < 0.8)) e.push(["hCoef", "expected roughly 0.49"]);
+    if (!(row.bezel >= 0 && row.bezel < 6)) e.push(["bezel", "expected 0-6 inches"]);
+    return e;
+  }
+}];
+
+// Run a table's rules across the EFFECTIVE catalog. Returns { key: [[col,msg]] }.
+const validateTable = (schema, table, ctx) => {
+  const out = {};
+  if (schema.kind === "scalars") {
+    const e = schema.validate ? schema.validate(table) : [];
+    if (e.length) out.__scalars = e;
+    return out;
+  }
+  Object.entries(table).forEach(([key, val]) => {
+    if (schema.kind === "nested2") {
+      Object.entries(val).forEach(([k2, row]) => {
+        const e = schema.validate ? schema.validate(row, k2, val, ctx) : [];
+        if (e.length) out[`${key}\u0000${k2}`] = e;
+      });
+    } else {
+      const e = schema.validate ? schema.validate(val, key, table, ctx) : [];
+      if (e.length) out[key] = e;
+    }
+  });
+  return out;
 };
 const normKey = k => String(k).toLowerCase().replace(/[\s_-]/g, "");
 
@@ -1326,18 +2253,18 @@ const runSelfTests = () => {
       centerH: 42,
       tvCL: 60,
       showBackBox: true,
-      effectiveBoxModel: "SB-RBX-PRO-14",
+      effectiveBoxModel: "SM-RBX-PRO-14",
       mountSystem: "sanus",
       sanusMount: null
     };
     const L = computeLayout(inp);
     T("golden", "A: TV 57.9 × 33.1", approx(L.tvW, 57.88) && approx(L.tvH, 33.05), `w=${L.tvW.toFixed(2)} h=${L.tvH.toFixed(2)}`);
     T("golden", "A: VESA center 41.01\" AFF (−3% bias)", approx(L.vesa.aff, 41.0085), `aff=${L.vesa.aff.toFixed(3)}`);
-    T("golden", "A: box center 75.91\" from left", approx(L.box.cx, 75.9055), `cx=${L.box.cx.toFixed(3)}`);
-    T("golden", "A: PWR 36.51\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 36.5085) && approx(L.outlet.x - L.tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)} dx=${(L.outlet.x - L.tvCL).toFixed(3)}`);
-    T("golden", "A: LV 19.41\" right of CL", approx(L.lv.x - L.tvCL, 19.4055), `dx=${(L.lv.x - L.tvCL).toFixed(3)}`);
+    T("golden", "A: box center 76.03\" from left", approx(L.box.cx, 76.0305), `cx=${L.box.cx.toFixed(3)}`); // 60 + 11.811/2 + 3 + 14.25/2
+    T("golden", "A: PWR 36.86\" AFF, 12.47\" right of CL", approx(L.outlet.aff, 36.8635) && approx(L.outlet.x - L.tvCL, 12.468), `aff=${L.outlet.aff.toFixed(3)} dx=${(L.outlet.x - L.tvCL).toFixed(3)}`); // 41.0085 - 13.29/2 + 2.5
+    T("golden", "A: LV 19.59\" right of CL", approx(L.lv.x - L.tvCL, 19.593), `dx=${(L.lv.x - L.tvCL).toFixed(3)}`); // cx + 14.25*0.25
     T("golden", "A: box within TV, not flagged", !L.box.extendsOff && !L.box.underRated);
-    T("golden", "A: box bottom 34.01\" AFF, 8.53\" above TV bottom", approx(L.box.btm, 34.0085) && approx(L.box.btm - L.tvBottom, 8.5335), `btm=${L.box.btm.toFixed(3)} d=${(L.box.btm - L.tvBottom).toFixed(3)}`);
+    T("golden", "A: box bottom 34.36\" AFF, 8.89\" above TV bottom", approx(L.box.btm, 34.3635) && approx(L.box.btm - L.tvBottom, 8.8885), `btm=${L.box.btm.toFixed(3)} d=${(L.box.btm - L.tvBottom).toFixed(3)}`);
     T("golden", "A: tape-out edges L 31.06 / R 88.94 / T 58.53 / B 25.48", approx(L.tvLeft, 31.06) && approx(L.tvRight, 88.94) && approx(L.tvTop, 58.525) && approx(L.tvBottom, 25.475), `L=${L.tvLeft.toFixed(2)} R=${L.tvRight.toFixed(2)} T=${L.tvTop.toFixed(2)} B=${L.tvBottom.toFixed(2)}`);
   }
   // ---- Golden case B: "Smith Residence" — fireplace +15", mantel 54", bottom override 53.5 ----
@@ -1374,11 +2301,11 @@ const runSelfTests = () => {
       centerH,
       tvCL,
       showBackBox: true,
-      effectiveBoxModel: "SB-RBX-PRO-14",
+      effectiveBoxModel: "SM-RBX-PRO-14",
       mountSystem: "sanus",
       sanusMount: null
     });
-    T("golden", "B: PWR 64.53\" AFF, 12.41\" right of CL", approx(L.outlet.aff, 64.5335) && approx(L.outlet.x - tvCL, 12.4055), `aff=${L.outlet.aff.toFixed(3)}`);
+    T("golden", "B: PWR 64.89\" AFF, 12.47\" right of CL", approx(L.outlet.aff, 64.8885) && approx(L.outlet.x - tvCL, 12.468), `aff=${L.outlet.aff.toFixed(3)}`); // 69.0335 - 13.29/2 + 2.5
   }
   // ---- Golden case C: LG 55" (−10% VESA bias, shallow box) ----
   {
@@ -1388,16 +2315,16 @@ const runSelfTests = () => {
       centerH: 42,
       tvCL: 60,
       showBackBox: true,
-      effectiveBoxModel: "SB-RBX-PRO-8",
+      effectiveBoxModel: "SM-RBX-PRO-8",
       mountSystem: "sanus",
       sanusMount: null
     });
     T("golden", "C: LG 55 VESA center 39.19\" AFF (−10%)", approx(L.vesa.aff, 39.185), `aff=${L.vesa.aff.toFixed(3)}`);
-    T("golden", "C: outlet 37.69\" AFF in 8\"-tall box", approx(L.outlet.aff, 37.685), `aff=${L.outlet.aff.toFixed(3)}`);
+    T("golden", "C: outlet 37.54\" AFF in 8.29\"-tall box", approx(L.outlet.aff, 37.540), `aff=${L.outlet.aff.toFixed(3)}`); // 39.185 - 8.29/2 + 2.5
   }
   // ---- Golden: back-box selector branches ----
-  T("golden", "Samsung 85 Sanus → Pro XL (One Connect)", recommendBackBox(85, "sanus", "Samsung") === "SB-RBX-PRO-XL");
-  T("golden", "Sony 98 Sanus → Pro XL (>85 rule)", recommendBackBox(98, "sanus", "Sony") === "SB-RBX-PRO-XL");
+  T("golden", "Samsung 85 Sanus → Pro XL (One Connect)", recommendBackBox(85, "sanus", "Samsung") === "SM-RBX-PRO-20");
+  T("golden", "Sony 98 Sanus → Pro XL (>85 rule)", recommendBackBox(98, "sanus", "Sony") === "SM-RBX-PRO-20");
   T("golden", "Sony 100 articulating → WB80, flagged under-rated", (() => {
     const L = computeLayout({
       selectedSize: 100,
@@ -1429,7 +2356,7 @@ const runSelfTests = () => {
       centerH: 50,
       tvCL: 75,
       showBackBox: true,
-      effectiveBoxModel: "SB-RBX-PRO-XL",
+      effectiveBoxModel: "SM-RBX-PRO-20",
       mountSystem: "sanus",
       sanusMount: null
     });
@@ -1482,6 +2409,468 @@ const runSelfTests = () => {
   T("format", `-2.5 → -2-1/2"`, fmtIn(-2.5, "frac") === `-2-1/2"`, fmtIn(-2.5, "frac"));
 
   // ---- JSON interop: the extractor pulls TV fields from foreign files ----
+  // ---- back box data integrity ----
+  // These pin the 2026-08-19 spec-sheet audit and deliberately run against the
+  // SHIPPED baseline, not the effective catalog: a local override must never be
+  // able to turn the app's health badge red. The same rules are re-run against
+  // effective data inside the Data screen, where they surface as cell errors.
+  T("studBay", "every FA box declares its stud requirement", (() => Object.entries(BASE_BACK_BOXES).filter(([, b]) => b.brand === "Future Automation").every(([, b]) => !!STUD_CLEAR[b.studs]))());
+  T("studBay", "no box is wider than the framing it claims to fit", (() => Object.values(BASE_BACK_BOXES).filter(b => b.studs).every(b => b.w <= STUD_CLEAR[b.studs]))());
+  T("studBay", "single-bay boxes physically fit between 16\" o.c. studs", (() => Object.entries(BASE_BACK_BOXES).filter(([, b]) => b.studs === "single").every(([, b]) => b.w <= STUD_CLEAR.single))());
+  T("studBay", "twin-stud boxes fit the 30\" cut-out", (() => Object.entries(BASE_BACK_BOXES).filter(([, b]) => b.studs === "twin").every(([, b]) => b.w <= STUD_CLEAR.twin))());
+  T("studBay", "a -2S variant is never identical to its single-stud sibling", (() => {
+    const pairs = Object.keys(BASE_BACK_BOXES).filter(k => k.endsWith("-2S")).map(k => [k, k.replace(/-2S$/, "")]).filter(([, base]) => BASE_BACK_BOXES[base]);
+    if (!pairs.length) return false;
+    return pairs.every(([tw, base]) => {
+      const a = BASE_BACK_BOXES[tw],
+        b = BASE_BACK_BOXES[base];
+      return a.w !== b.w && a.w > b.w; // twin stud exists to be WIDER
+    });
+  })());
+  T("studBay", "single-bay WB boxes are taller than wide (portrait in the bay)", (() => Object.entries(BASE_BACK_BOXES).filter(([, b]) => b.line === "WB" && b.studs === "single").every(([, b]) => b.h > b.w))());
+  T("studBay", "WB21 matches the published sheet (532 x 353 x 96.5mm)", (() => {
+    const b = BASE_BACK_BOXES["FA-WB21"];
+    return approx(b.w, 353 / 25.4, 0.05) && approx(b.h, 532 / 25.4, 0.05) && approx(b.d, 96.5 / 25.4, 0.05);
+  })());
+  T("studBay", "WB21-2S matches the install-guide cut-out (762 x 540mm)", (() => {
+    const b = BASE_BACK_BOXES["FA-WB21-2S"];
+    return approx(b.w, 760 / 25.4, 0.06) && approx(b.h, 537 / 25.4, 0.06);
+  })());
+  T("studBay", "every VersaBox fits one 16\" o.c. bay (all ~14.25 wide)", (() => Object.entries(BASE_BACK_BOXES).filter(([, b]) => b.line && b.line.startsWith("VersaBox")).every(([, b]) => b.w >= 13.9 && b.w <= STUD_CLEAR.single))());
+  T("studBay", "VersaBox Pro XL is portrait, 14.25 x 20 (was stored transposed)", (() => {
+    const b = BASE_BACK_BOXES["SM-RBX-PRO-20"];
+    return approx(b.w, 14.25, 0.01) && approx(b.h, 20.0, 0.01) && b.h > b.w;
+  })());
+  T("studBay", "legacy SB-RBX-* keys still resolve to a real box", (() => ["SB-RBX-8", "SB-RBX-14", "SB-RBX-PRO-8", "SB-RBX-PRO-14", "SB-RBX-PRO-XL"].every(k => !!BASE_BACK_BOXES[canonBoxKey(k)]))());
+  T("studBay", "WB80 matches its stated WxHxD (1169 x 863 x 97mm)", (() => {
+    const b = BASE_BACK_BOXES["FA-WB80"];
+    return approx(b.w, 1169 / 25.4, 0.05) && approx(b.h, 863 / 25.4, 0.05) && approx(b.d, 97 / 25.4, 0.05);
+  })());
+  T("studBay", "every box carries a bracket and a sane size range", (() => Object.values(BASE_BACK_BOXES).every(b => !!b.bracket && b.tvMin > 0 && b.tvMax > b.tvMin))());
+
+  // ---- reference underlay: calibration + markup ----
+  const U0 = {
+    natW: 1000,
+    natH: 500,
+    ...fitUnderlay(1000, 500, 120, 108)
+  };
+  T("underlay", "fit-to-wall lands inside the wall", (() => {
+    const u = U0;
+    return approx(underlayInW(u), 120, 0.01) && underlayInH(u) <= 108 + 0.01 && approx(u.ox, 0, 0.01) && approx(u.oy, (108 + underlayInH(u)) / 2, 0.01);
+  })());
+  T("underlay", "two-point calibrate makes the picked span read true", (() => {
+    // pick a span the fitted image thinks is 60" and declare it 96"
+    const p1 = {
+        x: 10,
+        y: 40
+      },
+      p2 = {
+        x: 70,
+        y: 40
+      };
+    const u = calibrateTwoPoint(U0, p1, p2, 96);
+    if (!u) return false;
+    // that span, re-measured in the new frame, must now be 96"
+    const nat1 = (p1.x - U0.ox) * U0.ppi,
+      nat2 = (p2.x - U0.ox) * U0.ppi;
+    const in1 = u.ox + nat1 / u.ppi,
+      in2 = u.ox + nat2 / u.ppi;
+    return approx(in2 - in1, 96, 0.001);
+  })());
+  T("underlay", "calibration anchors on the first click (no jump)", (() => {
+    const p1 = {
+        x: 10,
+        y: 40
+      },
+      p2 = {
+        x: 70,
+        y: 40
+      };
+    const u = calibrateTwoPoint(U0, p1, p2, 96);
+    const natX = (p1.x - U0.ox) * U0.ppi,
+      natY = (U0.oy - p1.y) * U0.ppi;
+    return approx(u.ox + natX / u.ppi, p1.x, 0.001) && approx(u.oy - natY / u.ppi, p1.y, 0.001);
+  })());
+  T("underlay", "rescale is reversible", (() => {
+    const a = {
+      x: 33,
+      y: 44
+    };
+    const back = rescaleUnderlay(rescaleUnderlay(U0, 2.5, a), 1 / 2.5, a);
+    return approx(back.ppi, U0.ppi, 1e-6) && approx(back.ox, U0.ox, 1e-6) && approx(back.oy, U0.oy, 1e-6);
+  })());
+  T("underlay", "snap-to-TV scales from panel width and re-centres", (() => {
+    // a 65" Sony is 57.9" wide; user boxes it 30" wide in the current frame
+    const realW = tvDimsFor("Sony", 65).w;
+    const target = {
+      x: 60,
+      y: 50
+    };
+    const u = calibrateToBox(U0, {
+      x1: 20,
+      y1: 60,
+      x2: 50,
+      y2: 40
+    }, realW, target);
+    if (!u) return false;
+    const boxNat1 = (20 - U0.ox) * U0.ppi,
+      boxNat2 = (50 - U0.ox) * U0.ppi;
+    const w = (boxNat2 - boxNat1) / u.ppi;
+    const cxNat = ((20 + 50) / 2 - U0.ox) * U0.ppi;
+    return approx(w, realW, 0.001) && approx(u.ox + cxNat / u.ppi, target.x, 0.001);
+  })());
+  T("underlay", "degenerate picks are rejected, not applied", (() => {
+    const same = calibrateTwoPoint(U0, {
+      x: 5,
+      y: 5
+    }, {
+      x: 5,
+      y: 5
+    }, 96);
+    const zero = calibrateTwoPoint(U0, {
+      x: 1,
+      y: 1
+    }, {
+      x: 9,
+      y: 1
+    }, 0);
+    return same === null && zero === null;
+  })());
+  T("underlay", `length parser: 96 / 8' / 8'6" / 6 1/2 / junk`, (() => approx(parseLenIn("96"), 96) && approx(parseLenIn("8'"), 96) && approx(parseLenIn(`8' 6"`), 102) && approx(parseLenIn("6 1/2"), 6.5) && approx(parseLenIn(`96"`), 96) && isNaN(parseLenIn("abc")) && isNaN(parseLenIn("")))());
+  T("markup", "pen decimation keeps the endpoints", (() => {
+    const raw = [];
+    for (let i = 0; i <= 40; i++) raw.push({
+      x: i,
+      y: 0
+    }); // dead-straight run
+    const out = simplifyPts(raw, 0.25);
+    return out.length === 2 && out[0].x === 0 && out[1].x === 40;
+  })());
+  T("markup", "pen decimation keeps a real corner", (() => {
+    const out = simplifyPts([{
+      x: 0,
+      y: 0
+    }, {
+      x: 5,
+      y: 0
+    }, {
+      x: 10,
+      y: 0
+    }, {
+      x: 10,
+      y: 10
+    }], 0.25);
+    return out.length === 3;
+  })());
+  T("markup", "point-to-segment distance clamps at the ends", (() => approx(distToSeg({
+    x: 5,
+    y: 3
+  }, {
+    x: 0,
+    y: 0
+  }, {
+    x: 10,
+    y: 0
+  }), 3, 1e-9) && approx(distToSeg({
+    x: -4,
+    y: 0
+  }, {
+    x: 0,
+    y: 0
+  }, {
+    x: 10,
+    y: 0
+  }), 4, 1e-9) && approx(distToSeg({
+    x: 14,
+    y: 0
+  }, {
+    x: 0,
+    y: 0
+  }, {
+    x: 10,
+    y: 0
+  }), 4, 1e-9))());
+  T("markup", "hit test picks the topmost item under the cursor", (() => {
+    const items = [{
+      type: "line",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 10,
+        y: 0
+      }]
+    }, {
+      type: "line",
+      pts: [{
+        x: 0,
+        y: 1
+      }, {
+        x: 10,
+        y: 1
+      }]
+    }];
+    return hitMarkup(items, {
+      x: 5,
+      y: 0.9
+    }, 1) === 1 && hitMarkup(items, {
+      x: 5,
+      y: 0.1
+    }, 0.5) === 0 && hitMarkup(items, {
+      x: 5,
+      y: 40
+    }, 1) === -1;
+  })());
+  T("markup", "a box edge is grabbable but its empty middle is not", (() => {
+    const items = [{
+      type: "rect",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 20,
+        y: 20
+      }]
+    }];
+    return hitMarkup(items, {
+      x: 10,
+      y: 0.2
+    }, 1) === 0 && hitMarkup(items, {
+      x: 10,
+      y: 10
+    }, 1) === -1;
+  })());
+  T("markup", "handle counts: box 4, line 2, pen/text move-only", (() => handlesFor({
+    type: "rect",
+    pts: [{
+      x: 0,
+      y: 0
+    }, {
+      x: 4,
+      y: 4
+    }]
+  }).length === 4 && handlesFor({
+    type: "measure",
+    pts: [{
+      x: 0,
+      y: 0
+    }, {
+      x: 4,
+      y: 0
+    }]
+  }).length === 2 && handlesFor({
+    type: "pen",
+    pts: [{
+      x: 0,
+      y: 0
+    }, {
+      x: 1,
+      y: 1
+    }, {
+      x: 2,
+      y: 0
+    }]
+  }).length === 0 && handlesFor({
+    type: "text",
+    pts: [{
+      x: 0,
+      y: 0
+    }],
+    text: "x"
+  }).length === 0)());
+  T("markup", "dragging a box corner holds the opposite corner", (() => {
+    const r0 = {
+      type: "rect",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 20,
+        y: 10
+      }]
+    };
+    const r1 = moveHandle(r0, 2, {
+      x: 30,
+      y: 25
+    }); // corner 2 = (b.x, b.y)
+    const r2 = moveHandle(r0, 0, {
+      x: -5,
+      y: -5
+    }); // corner 0 = (a.x, a.y)
+    return r1.pts[0].x === 0 && r1.pts[0].y === 0 && r1.pts[1].x === 30 && r1.pts[1].y === 25 && r2.pts[1].x === 20 && r2.pts[1].y === 10 && r2.pts[0].x === -5;
+  })());
+  T("markup", "dragging an endpoint leaves the other end alone", (() => {
+    const m = moveHandle({
+      type: "line",
+      pts: [{
+        x: 1,
+        y: 2
+      }, {
+        x: 9,
+        y: 2
+      }]
+    }, 1, {
+      x: 12,
+      y: 7
+    });
+    return m.pts[0].x === 1 && m.pts[0].y === 2 && m.pts[1].x === 12 && m.pts[1].y === 7;
+  })());
+  T("markup", "translate shifts every point and preserves shape", (() => {
+    const m = translateMarkup({
+      type: "pen",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 3,
+        y: 4
+      }]
+    }, 5, -2);
+    return m.pts[0].x === 5 && m.pts[0].y === -2 && m.pts[1].x === 8 && m.pts[1].y === 2 && approx(markupSpan(m), 5, 1e-9);
+  })());
+  T("snap", "snaps each axis to the nearest meaningful anchor", (() => {
+    const L = computeLayout({
+      selectedSize: 65,
+      brand: "Sony",
+      centerH: 42,
+      tvCL: 60,
+      showBackBox: false,
+      mountSystem: "sanus",
+      sanusMount: null
+    });
+    const a = snapAnchors(L, 120, 108);
+    const r = snapPoint({
+      x: 32.0,
+      y: 50
+    }, a, 2, null); // 0.94" shy of tvLeft
+    return approx(r.x, L.tvLeft, 1e-9) && r.hitX.why === "TV left" && r.y === 50;
+  })());
+  T("snap", "leaves a point alone when nothing is close", (() => {
+    const a = snapAnchors(null, 120, 108);
+    const r = snapPoint({
+      x: 55,
+      y: 44
+    }, a, 2, null);
+    return r.x === 55 && r.y === 44 && !r.hitX && !r.hitY;
+  })());
+  T("snap", "ortho lock levels a two-point shape", (() => {
+    const a = snapAnchors(null, 120, 108);
+    const r = snapPoint({
+      x: 87.7,
+      y: 50.6
+    }, a, 2, {
+      x: 31.06,
+      y: 50
+    });
+    return approx(r.y, 50, 1e-9) && r.orthoY === true;
+  })());
+  T("snap", "an anchor beats the ortho lock on the same axis", (() => {
+    const L = computeLayout({
+      selectedSize: 65,
+      brand: "Sony",
+      centerH: 42,
+      tvCL: 60,
+      showBackBox: false,
+      mountSystem: "sanus",
+      sanusMount: null
+    });
+    const a = snapAnchors(L, 120, 108);
+    const r = snapPoint({
+      x: 60,
+      y: L.tvTop + 0.3
+    }, a, 2, {
+      x: 10,
+      y: 20
+    });
+    return approx(r.y, L.tvTop, 1e-9) && !r.orthoY;
+  })());
+  T("markup", "a measure label never lands on its own shaft", (() => {
+    const vert = measureLabelPos(100, 50, 100, 200); // vertical run
+    const horiz = measureLabelPos(50, 100, 200, 100); // horizontal run
+    const diag = measureLabelPos(0, 0, 100, 100);
+    return approx(Math.abs(vert.x - 100), 13, 1e-6) && approx(vert.y, 125, 1e-6) &&
+    // pushed sideways
+    approx(horiz.x, 125, 1e-6) && approx(Math.abs(horiz.y - 100), 13, 1e-6) &&
+    // pushed up
+    approx(Math.hypot(diag.x - 50, diag.y - 50), 13, 1e-6); // always clear by 13
+  })());
+  T("markup", "a blanking patch is hit anywhere inside it, a box only on its edge", (() => {
+    const mask = [{
+      type: "mask",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 20,
+        y: 20
+      }]
+    }];
+    const box = [{
+      type: "rect",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 20,
+        y: 20
+      }]
+    }];
+    return hitMarkup(mask, {
+      x: 10,
+      y: 10
+    }, 0.5) === 0 && hitMarkup(box, {
+      x: 10,
+      y: 10
+    }, 0.5) === -1;
+  })());
+  T("markup", "a blanking patch exposes four corner handles", (() => handlesFor({
+    type: "mask",
+    pts: [{
+      x: 0,
+      y: 0
+    }, {
+      x: 5,
+      y: 5
+    }]
+  }).length === 4)());
+  T("markup", "measure span is the true wall-inch distance", (() => approx(markupSpan({
+    pts: [{
+      x: 0,
+      y: 0
+    }, {
+      x: 3,
+      y: 4
+    }]
+  }), 5, 1e-9))());
+  T("markup", "markup reaches the DXF on its own layer", (() => {
+    const dxfLayout2 = computeLayout({
+      selectedSize: 65,
+      brand: "Sony",
+      centerH: 52,
+      tvCL: 60,
+      showBackBox: false,
+      mountSystem: "sanus",
+      sanusMount: null
+    });
+    const d = buildDXF({
+      wallW: 120,
+      wallH: 108,
+      brand: "Sony",
+      selectedSize: 65,
+      dispUnits: "dec",
+      markup: [{
+        type: "line",
+        pts: [{
+          x: 1,
+          y: 2
+        }, {
+          x: 3,
+          y: 4
+        }]
+      }]
+    }, dxfLayout2);
+    return typeof d === "string" && d.includes("MARKUP");
+  })());
   T("interop", "Job-walk style JSON → brand/size/wall/project/fireplace", (() => {
     const ex = extractImportedDesign({
       job: {
@@ -1554,7 +2943,7 @@ const runSelfTests = () => {
       centerH: 42,
       tvCL: 60,
       showBackBox: true,
-      effectiveBoxModel: "SB-RBX-PRO-14",
+      effectiveBoxModel: "SM-RBX-PRO-14",
       mountSystem: "sanus",
       sanusMount: recommendSanusMount(65, "fixed", "Sony")
     });
@@ -1760,6 +3149,8 @@ const SCREEN_PALETTE = {
   dimText: "#E8EEF5",
   dimSub: "#8DA3B8",
   halo: "#0D1B2A",
+  dimW: 1,
+  maskFill: "#0D1B2A",
   cl: "#FF7A6B",
   vesa: "#FFD166",
   box: "#3ECFE0",
@@ -1790,6 +3181,8 @@ const PRINT_PALETTE = {
   dimText: "#102A43",
   dimSub: "#5C7186",
   halo: "#FFFFFF",
+  dimW: 1,
+  maskFill: "#FFFFFF",
   cl: "#C0392B",
   vesa: "#8A6A1A",
   box: "#0E7C90",
@@ -1813,6 +3206,29 @@ const PRINT_PALETTE = {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // IBM Plex Mono advance ≈ 0.6em
+// Over an imported drawing the blueprint palette inverts on itself: near-white
+// ink vanishes on a white scan. Trace mode therefore reuses the PRINT palette —
+// dark ink on white, already tuned for paper — and hollows every solid so the
+// drawing underneath stays readable while you align to it. Side effect worth
+// having: the screen now matches the exported PDF.
+const tracePalette = P => ({
+  ...PRINT_PALETTE,
+  id: P.id,
+  canvas: "#F2F5F8",
+  grid: "rgba(16,42,67,0.06)",
+  wallFill: "none",
+  tvFill: "none",
+  screenFill: "none",
+  mantel: "none",
+  fbFill: "none",
+  fbOpen: "none",
+  tvLabel: "#5C7186",
+  dimW: 1.6,
+  // Over a scan the label plates go fully opaque — a translucent plate lets the
+  // architect's linework bleed through the callout pills and dimension text.
+  halo: "#FFFFFF",
+  maskFill: "#FFFFFF"
+});
 const textW = (str, fontSize) => str.length * fontSize * 0.62;
 
 // Pack rail entries top-down using each entry's REAL height (pills can have
@@ -1834,7 +3250,189 @@ const packRail = (entries, minY) => {
   });
   return sorted;
 };
-const buildSchematic = (S, P) => {
+
+// Renders the markup layer for a given inch->pixel frame. Shared by the
+// schematic build and by the live in-progress stroke, so a pen drag repaints a
+// handful of nodes instead of rebuilding several hundred.
+const renderMarkupEls = (items, {
+  wallX,
+  floorY,
+  scale,
+  keyPrefix = "mk",
+  fmt,
+  paper
+}) => {
+  const out = [];
+  const MX = pt => wallX + pt.x * scale;
+  const MY = pt => floorY - pt.y * scale;
+  const MXY = pt => ({
+    x: MX(pt),
+    y: MY(pt)
+  });
+  (items || []).forEach((m, i) => {
+    if (!m) return;
+    const key = `${keyPrefix}-${m.id ?? i}`;
+    const col = m.color || "#FF3B30";
+    const sw = m.w || 2;
+    const pts = m.pts || [];
+    if (!pts.length) return;
+    const a = pts[0],
+      b = pts[pts.length - 1];
+    if (m.type === "mask") {
+      // Blanking patch: paints over the imported drawing so the schematic above
+      // it can be read. Uses the palette's paper colour, not white, so it
+      // disappears in the blueprint view as well as the trace view.
+      const c = rectCorners(pts[0], pts[pts.length - 1]).map(MXY);
+      out.push(/*#__PURE__*/React.createElement("polygon", {
+        key: key,
+        points: c.map(q => `${q.x},${q.y}`).join(" "),
+        fill: paper || "#FFFFFF",
+        stroke: "none"
+      }));
+    } else if (m.type === "pen") {
+      out.push(/*#__PURE__*/React.createElement("polyline", {
+        key: key,
+        points: pts.map(pt => `${MX(pt)},${MY(pt)}`).join(" "),
+        fill: "none",
+        stroke: col,
+        strokeWidth: sw,
+        strokeLinecap: "round",
+        strokeLinejoin: "round"
+      }));
+    } else if (m.type === "line") {
+      out.push(/*#__PURE__*/React.createElement("line", {
+        key: key,
+        x1: MX(a),
+        y1: MY(a),
+        x2: MX(b),
+        y2: MY(b),
+        stroke: col,
+        strokeWidth: sw,
+        strokeLinecap: "round"
+      }));
+    } else if (m.type === "arrow") {
+      const x1 = MX(a),
+        y1 = MY(a),
+        x2 = MX(b),
+        y2 = MY(b);
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      const hl = Math.max(8, sw * 4);
+      out.push(/*#__PURE__*/React.createElement("line", {
+        key: key,
+        x1: x1,
+        y1: y1,
+        x2: x2 - Math.cos(ang) * hl * 0.6,
+        y2: y2 - Math.sin(ang) * hl * 0.6,
+        stroke: col,
+        strokeWidth: sw,
+        strokeLinecap: "round"
+      }));
+      out.push(/*#__PURE__*/React.createElement("polygon", {
+        key: `${key}-h`,
+        fill: col,
+        points: [[x2, y2], [x2 - Math.cos(ang - 0.4) * hl, y2 - Math.sin(ang - 0.4) * hl], [x2 - Math.cos(ang + 0.4) * hl, y2 - Math.sin(ang + 0.4) * hl]].map(q => q.join(",")).join(" ")
+      }));
+    } else if (m.type === "rect") {
+      out.push(/*#__PURE__*/React.createElement("rect", {
+        key: key,
+        x: Math.min(MX(a), MX(b)),
+        y: Math.min(MY(a), MY(b)),
+        width: Math.abs(MX(b) - MX(a)),
+        height: Math.abs(MY(b) - MY(a)),
+        fill: "none",
+        stroke: col,
+        strokeWidth: sw
+      }));
+    } else if (m.type === "text") {
+      const fs = m.size || 13;
+      const tw = textW(m.text || "", fs) + 8;
+      out.push(/*#__PURE__*/React.createElement("rect", {
+        key: `${key}-b`,
+        x: MX(a) - 4,
+        y: MY(a) - fs + 1,
+        width: tw,
+        height: fs + 5,
+        rx: "2",
+        fill: paper || "#FFFFFF",
+        stroke: "none"
+      }));
+      out.push(/*#__PURE__*/React.createElement("text", {
+        key: key,
+        x: MX(a),
+        y: MY(a),
+        fill: col,
+        fontSize: fs,
+        fontWeight: "600",
+        fontFamily: "'IBM Plex Mono', monospace"
+      }, m.text || ""));
+    } else if (m.type === "measure") {
+      const x1 = MX(a),
+        y1 = MY(a),
+        x2 = MX(b),
+        y2 = MY(b);
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      const tx = Math.cos(ang + Math.PI / 2) * 5,
+        ty = Math.sin(ang + Math.PI / 2) * 5;
+      out.push(/*#__PURE__*/React.createElement("line", {
+        key: key,
+        x1: x1,
+        y1: y1,
+        x2: x2,
+        y2: y2,
+        stroke: col,
+        strokeWidth: sw
+      }));
+      out.push(/*#__PURE__*/React.createElement("line", {
+        key: `${key}-t1`,
+        x1: x1 - tx,
+        y1: y1 - ty,
+        x2: x1 + tx,
+        y2: y1 + ty,
+        stroke: col,
+        strokeWidth: sw
+      }));
+      out.push(/*#__PURE__*/React.createElement("line", {
+        key: `${key}-t2`,
+        x1: x2 - tx,
+        y1: y2 - ty,
+        x2: x2 + tx,
+        y2: y2 + ty,
+        stroke: col,
+        strokeWidth: sw
+      }));
+      // Offset the label along the line's NORMAL, not just upward: a vertical
+      // measure used to centre its text on its own shaft and get struck through.
+      const lbl = fmt ? fmt(markupSpan(m)) : markupSpan(m).toFixed(2);
+      const lp = measureLabelPos(x1, y1, x2, y2);
+      const lx = lp.x,
+        ly = lp.y;
+      const lw = textW(lbl, 12) + 8;
+      out.push(/*#__PURE__*/React.createElement("rect", {
+        key: `${key}-lb`,
+        x: lx - lw / 2,
+        y: ly - 10,
+        width: lw,
+        height: 14,
+        rx: "2",
+        fill: paper || "#FFFFFF",
+        stroke: "none"
+      }));
+      out.push(/*#__PURE__*/React.createElement("text", {
+        key: `${key}-l`,
+        x: lx,
+        y: ly + 1,
+        textAnchor: "middle",
+        dominantBaseline: "middle",
+        fill: col,
+        fontSize: "12",
+        fontWeight: "600",
+        fontFamily: "'IBM Plex Mono', monospace"
+      }, lbl));
+    }
+  });
+  return out;
+};
+const buildSchematic = (S, BASE_P) => {
   const {
     wallW,
     wallH,
@@ -1864,8 +3462,13 @@ const buildSchematic = (S, P) => {
     dispUnits,
     isMobile,
     isTablet,
-    viewportW
+    viewportW,
+    underlay,
+    markup
   } = S;
+  const hasUnderlay = !!(underlay && underlay.src && underlay.visible !== false);
+  const traceOn = hasUnderlay && S.trace !== false;
+  const P = traceOn ? tracePalette(BASE_P) : BASE_P;
   const fmt = v => fmtIn(v, dispUnits);
 
   // drawing vocabulary — abbreviated (default) or spelled out (FULL WORDS).
@@ -1990,24 +3593,102 @@ const buildSchematic = (S, P) => {
   const svgWForRow = safeWallW * scale + leftPad + (layout ? Math.max(basePad, 88) : Math.max(basePad, 88));
   const twoLineBottom = hasTitleBlock && textW(titleStr, 9) + textW(ntsStr, 9) + 48 > svgWForRow;
   const bottomPad = Math.max(basePad + 26 + (hasTitleBlock ? twoLineBottom ? 30 : 16 : 0), railBottomRel - safeWallH * scale + 30 + (hasTitleBlock ? twoLineBottom ? 30 : 16 : 0));
-  const wallX = leftPad;
-  const wallY = topPad;
+
+  // A calibrated sheet is usually several times the size of the TV wall. By
+  // default we let the root <svg> clip it, so the schematic keeps its full
+  // working size and the drawing shows through where it matters. "WHOLE SHEET"
+  // opts into growing the canvas instead — capped per side so a mis-scaled
+  // import can't shrink the TV to a dot.
   const wallPxW = safeWallW * scale;
   const wallPxH = safeWallH * scale;
+  let uL = 0,
+    uT = 0,
+    uR = 0,
+    uB = 0;
+  if (hasUnderlay && underlay.fitSheet) {
+    const capW = wallPxW * 1.5,
+      capH = wallPxH * 1.5;
+    const uw = underlayInW(underlay) * scale,
+      uh = underlayInH(underlay) * scale;
+    const ux = underlay.ox * scale; // px right of wall left edge
+    const uy = (safeWallH - underlay.oy) * scale; // px below wall top edge
+    uL = Math.min(Math.max(0, -ux - leftPad), capW);
+    uT = Math.min(Math.max(0, -uy - topPad), capH);
+    uR = Math.min(Math.max(0, ux + uw - wallPxW - rightPad), capW);
+    uB = Math.min(Math.max(0, uy + uh - wallPxH - bottomPad), capH);
+  }
+  const wallX = leftPad + uL;
+  const wallY = topPad + uT;
   const floorY = wallY + wallPxH;
-  const svgW = wallPxW + leftPad + rightPad;
-  const svgH = wallPxH + topPad + bottomPad;
+  const svgW = wallPxW + leftPad + uL + rightPad + uR;
+  const svgH = wallPxH + topPad + uT + bottomPad + uB;
   const elements = [];
   const K = k => `${P.id}-${k}`; // unique keys/ids per palette render
+  // Index where the ANNOTATION layer starts — callout pills, dimension lines
+  // and every dimension label. Hand markup is spliced in here rather than
+  // appended, so a redline can never strike through the drawing's own
+  // dimensions. Geometry (wall, TV, box) still sits under the markup.
+  let labelStart = -1;
 
-  // wall + floor
+  // Imported reference elevation, painted under the schematic.
+  //
+  // Two ways to get the architect's clutter out of the way, in this order:
+  //   crop   — a window on the sheet; everything outside it simply is not drawn
+  //            (kills border hatching, title blocks, the sheet's own dimension
+  //            strings) without touching the calibration
+  //   masks  — opaque patches over whatever is left inside the working area
+  // Both sit BELOW the schematic, so the TV and our dimensions still read.
+  if (hasUnderlay) {
+    const cr = underlay.crop;
+    const clipId = K("ucrop");
+    if (cr) {
+      elements.push(/*#__PURE__*/React.createElement("clipPath", {
+        key: K("ucd"),
+        id: clipId
+      }, /*#__PURE__*/React.createElement("rect", {
+        x: wallX + cr.x * scale,
+        y: floorY - (cr.y + cr.h) * scale,
+        width: cr.w * scale,
+        height: cr.h * scale
+      })));
+    }
+    elements.push(/*#__PURE__*/React.createElement("image", {
+      key: K("underlay"),
+      href: underlay.src,
+      xlinkHref: underlay.src,
+      x: wallX + underlay.ox * scale,
+      y: floorY - underlay.oy * scale,
+      width: underlayInW(underlay) * scale,
+      height: underlayInH(underlay) * scale,
+      opacity: underlay.opacity ?? 0.75,
+      preserveAspectRatio: "none",
+      clipPath: cr ? `url(#${clipId})` : undefined
+    }));
+  }
+
+  // Blanking patches sit directly on top of the reference drawing and directly
+  // below the schematic, so they hide the architect's clutter without ever
+  // hiding our own TV, dimensions or callouts.
+  const masks = (markup || []).filter(m => m && m.type === "mask");
+  if (masks.length) {
+    renderMarkupEls(masks, {
+      wallX,
+      floorY,
+      scale,
+      keyPrefix: K("mask"),
+      fmt,
+      paper: P.maskFill
+    }).forEach(el => elements.push(el));
+  }
+
+  // wall + floor — fill drops to none over an underlay so the scan shows through
   elements.push(/*#__PURE__*/React.createElement("rect", {
     key: K("wall"),
     x: wallX,
     y: wallY,
     width: wallPxW,
     height: wallPxH,
-    fill: P.wallFill,
+    fill: hasUnderlay ? "none" : P.wallFill,
     stroke: P.wallStroke,
     strokeWidth: "1.5"
   }));
@@ -2491,6 +4172,7 @@ const buildSchematic = (S, P) => {
         }]
       });
     }
+    labelStart = elements.length;
     const railX = tvX + tvPxW + 16;
     packRail(rail, showTvDims ? tvY + 2 : wallY + 10).forEach(e => {
       elements.push(/*#__PURE__*/React.createElement("line", {
@@ -2518,7 +4200,7 @@ const buildSchematic = (S, P) => {
       x2: dimX,
       y2: refY,
       stroke: P.line,
-      strokeWidth: "1"
+      strokeWidth: P.dimW
     }));
     elements.push(/*#__PURE__*/React.createElement("line", {
       key: K("dha"),
@@ -2527,7 +4209,7 @@ const buildSchematic = (S, P) => {
       x2: dimX + 4,
       y2: floorY,
       stroke: P.line,
-      strokeWidth: "1"
+      strokeWidth: P.dimW
     }));
     elements.push(/*#__PURE__*/React.createElement("line", {
       key: K("dhb"),
@@ -2536,16 +4218,16 @@ const buildSchematic = (S, P) => {
       x2: dimX + 4,
       y2: refY,
       stroke: P.line,
-      strokeWidth: "1"
+      strokeWidth: P.dimW
     }));
     const dhMidY = (floorY + refY) / 2;
     const dhW = textW(leftDimText, 13) + 8;
     elements.push(/*#__PURE__*/React.createElement("rect", {
       key: K("dhbg"),
       x: dimX - 8 - dhW,
-      y: dhMidY - 10,
+      y: dhMidY - 12,
       width: dhW + 4,
-      height: 20,
+      height: 35,
       fill: P.halo,
       stroke: "none",
       rx: "2"
@@ -2600,7 +4282,7 @@ const buildSchematic = (S, P) => {
         x2: tvX + tvPxW,
         y2: dimY,
         stroke: P.line,
-        strokeWidth: "1"
+        strokeWidth: P.dimW
       }));
       elements.push(/*#__PURE__*/React.createElement("line", {
         key: K("dwa"),
@@ -2609,7 +4291,7 @@ const buildSchematic = (S, P) => {
         x2: tvX,
         y2: dimY + 4,
         stroke: P.line,
-        strokeWidth: "1"
+        strokeWidth: P.dimW
       }));
       elements.push(/*#__PURE__*/React.createElement("line", {
         key: K("dwb"),
@@ -2618,7 +4300,7 @@ const buildSchematic = (S, P) => {
         x2: tvX + tvPxW,
         y2: dimY + 4,
         stroke: P.line,
-        strokeWidth: "1"
+        strokeWidth: P.dimW
       }));
       const dwMidX = tvX + tvPxW / 2;
       const dwW = textW(wTxt, 13) + 8;
@@ -2665,7 +4347,7 @@ const buildSchematic = (S, P) => {
       x2: clPx,
       y2: clDimY,
       stroke: P.cl,
-      strokeWidth: "1"
+      strokeWidth: P.dimW
     }));
     elements.push(/*#__PURE__*/React.createElement("line", {
       key: K("cl-da"),
@@ -2674,7 +4356,7 @@ const buildSchematic = (S, P) => {
       x2: wallX,
       y2: clDimY + 4,
       stroke: P.cl,
-      strokeWidth: "1"
+      strokeWidth: P.dimW
     }));
     elements.push(/*#__PURE__*/React.createElement("line", {
       key: K("cl-db"),
@@ -2683,7 +4365,7 @@ const buildSchematic = (S, P) => {
       x2: clPx,
       y2: clDimY + 4,
       stroke: P.cl,
-      strokeWidth: "1"
+      strokeWidth: P.dimW
     }));
     const clTxt = `${fmt(layout.tvCL)} TO TV ${W.CL}`;
     const clMidX = (wallX + clPx) / 2;
@@ -2783,6 +4465,7 @@ const buildSchematic = (S, P) => {
       });
     }
   }
+  if (labelStart < 0) labelStart = elements.length; // no TV picked yet
 
   // wall width (bottom)
   const wdY = floorY + 30;
@@ -2793,7 +4476,7 @@ const buildSchematic = (S, P) => {
     x2: wallX + wallPxW,
     y2: wdY,
     stroke: P.line,
-    strokeWidth: "1"
+    strokeWidth: P.dimW
   }));
   elements.push(/*#__PURE__*/React.createElement("line", {
     key: K("wwa"),
@@ -2802,7 +4485,7 @@ const buildSchematic = (S, P) => {
     x2: wallX,
     y2: wdY + 4,
     stroke: P.line,
-    strokeWidth: "1"
+    strokeWidth: P.dimW
   }));
   elements.push(/*#__PURE__*/React.createElement("line", {
     key: K("wwb"),
@@ -2811,7 +4494,19 @@ const buildSchematic = (S, P) => {
     x2: wallX + wallPxW,
     y2: wdY + 4,
     stroke: P.line,
-    strokeWidth: "1"
+    strokeWidth: P.dimW
+  }));
+  const wwTxt = `${fmtIn(safeWallW, dispUnits)} WALL`;
+  const wwW = textW(wwTxt, 13) + 10;
+  elements.push(/*#__PURE__*/React.createElement("rect", {
+    key: K("wwbg"),
+    x: wallX + wallPxW / 2 - wwW / 2,
+    y: wdY + 4,
+    width: wwW,
+    height: 17,
+    rx: "2",
+    fill: P.halo,
+    stroke: "none"
   }));
   elements.push(/*#__PURE__*/React.createElement("text", {
     key: K("wwt"),
@@ -2822,7 +4517,7 @@ const buildSchematic = (S, P) => {
     fontSize: "13",
     fontWeight: "600",
     fontFamily: "'IBM Plex Mono', monospace"
-  }, fmtIn(safeWallW, dispUnits), " WALL"));
+  }, wwTxt));
 
   // wall height (right, lane-aware)
   const whX = wallX + hDimRelX;
@@ -2833,7 +4528,7 @@ const buildSchematic = (S, P) => {
     x2: whX,
     y2: floorY,
     stroke: P.line,
-    strokeWidth: "1"
+    strokeWidth: P.dimW
   }));
   elements.push(/*#__PURE__*/React.createElement("line", {
     key: K("wha"),
@@ -2842,7 +4537,7 @@ const buildSchematic = (S, P) => {
     x2: whX + 4,
     y2: wallY,
     stroke: P.line,
-    strokeWidth: "1"
+    strokeWidth: P.dimW
   }));
   elements.push(/*#__PURE__*/React.createElement("line", {
     key: K("whb"),
@@ -2851,7 +4546,19 @@ const buildSchematic = (S, P) => {
     x2: whX + 4,
     y2: floorY,
     stroke: P.line,
-    strokeWidth: "1"
+    strokeWidth: P.dimW
+  }));
+  const whTxt = `${fmtIn(safeWallH, dispUnits)} H`;
+  const whW = textW(whTxt, 13) + 10;
+  elements.push(/*#__PURE__*/React.createElement("rect", {
+    key: K("whbg"),
+    x: whX + 4,
+    y: (wallY + floorY) / 2 - 8,
+    width: whW,
+    height: 17,
+    rx: "2",
+    fill: P.halo,
+    stroke: "none"
   }));
   elements.push(/*#__PURE__*/React.createElement("text", {
     key: K("wht"),
@@ -2861,7 +4568,23 @@ const buildSchematic = (S, P) => {
     fontSize: "13",
     fontWeight: "600",
     fontFamily: "'IBM Plex Mono', monospace"
-  }, fmtIn(safeWallH, dispUnits), " H"));
+  }, whTxt));
+
+  // Hand markup goes ABOVE the geometry but BELOW the annotation layer, so a
+  // scribbled line cannot strike through a dimension the installer has to read.
+  // Blanking patches are excluded — they were painted under the schematic.
+  const inkMarkup = (markup || []).filter(m => m && m.type !== "mask");
+  if (inkMarkup.length) {
+    const inkEls = renderMarkupEls(inkMarkup, {
+      wallX,
+      floorY,
+      scale,
+      keyPrefix: K("mk"),
+      fmt,
+      paper: P.maskFill
+    });
+    elements.splice(labelStart < 0 ? elements.length : labelStart, 0, ...inkEls);
+  }
 
   // title block + NTS note — stacked on two rows when one can't hold both
   const tbY = svgH - 10;
@@ -2891,7 +4614,12 @@ const buildSchematic = (S, P) => {
     elements,
     svgW,
     svgH,
-    scale
+    scale,
+    wallX,
+    wallY,
+    floorY,
+    P,
+    traceOn
   };
 };
 
@@ -3382,6 +5110,458 @@ const runStressSweep = () => {
 // SECTION 6 — UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ---------------------------------------------------------------------------
+// Catalog mutation. Every write goes through here so the overlay, the effective
+// tables and localStorage never drift apart.
+const effective = () => ({
+  TV_CATALOG,
+  BACK_BOXES,
+  SANUS_MOUNTS,
+  SANUS_STYLE_ORDER,
+  VESA_DATA,
+  TV_OVERRIDES,
+  CLEARANCE,
+  FORMULA
+});
+const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const writeOverlay = mutate => {
+  const ov = clone(OVERLAY);
+  mutate(ov);
+  Object.keys(ov).forEach(id => {
+    // drop empty slices
+    const sl = ov[id];
+    if (sl && !Object.keys(sl.rows || {}).length && !(sl.removed || []).length) delete ov[id];
+  });
+  saveOverlay(ov);
+  applyOverlay(ov);
+};
+const slice = (ov, id) => ov[id] = ov[id] || {
+  rows: {},
+  removed: []
+};
+const setRow = (id, key, row) => writeOverlay(ov => {
+  const sl = slice(ov, id);
+  sl.rows[key] = row;
+  sl.removed = (sl.removed || []).filter(k => k !== key);
+});
+const dropRow = (id, key) => writeOverlay(ov => {
+  const sl = slice(ov, id);
+  delete sl.rows[key];
+  if (key in CATALOG_TABLES[id].base()) sl.removed = [...new Set([...(sl.removed || []), key])];
+});
+const revertRow = (id, key) => writeOverlay(ov => {
+  const sl = slice(ov, id);
+  delete sl.rows[key];
+  sl.removed = (sl.removed || []).filter(k => k !== key);
+});
+const resetTable = id => writeOverlay(ov => {
+  delete ov[id];
+});
+const resetCatalog = () => writeOverlay(ov => {
+  Object.keys(ov).forEach(k => delete ov[k]);
+});
+
+// row state vs the shipped baseline — drives the badges
+const rowState = (id, key, key2) => {
+  const base = CATALOG_TABLES[id].base();
+  const eff = effective()[id];
+  const b = key2 == null ? base[key] : (base[key] || {})[key2];
+  const e = key2 == null ? eff[key] : (eff[key] || {})[key2];
+  if (b === undefined) return "added";
+  return sameJSON(b, e) ? "stock" : "edited";
+};
+
+// ---------------------------------------------------------------------------
+const DataScreen = ({
+  onClose,
+  onChange
+}) => {
+  const [tab, setTab] = useState(TABLE_SCHEMAS[0].id);
+  const [, bump] = useState(0);
+  const [q, setQ] = useState("");
+  const fileRef = useRef(null);
+  const schema = TABLE_SCHEMAS.find(t => t.id === tab);
+  const eff = effective();
+  const table = eff[tab];
+  const errs = validateTable(schema, table, eff);
+  const touch = () => {
+    bump(n => n + 1);
+    onChange && onChange();
+  };
+  const commit = fn => {
+    fn();
+    touch();
+  };
+  const num = v => v === "" || v == null ? null : isNaN(parseFloat(v)) ? v : parseFloat(v);
+  const cellErr = (rowKey, col) => {
+    const list = errs[rowKey] || [];
+    const hit = list.find(([c]) => c === col);
+    return hit ? hit[1] : null;
+  };
+  const Input = ({
+    col,
+    value,
+    onSet,
+    bad
+  }) => {
+    if (col.t === "enum") {
+      return /*#__PURE__*/React.createElement("select", {
+        className: `dcell ${bad ? "bad" : ""}`,
+        value: value ?? "",
+        onChange: e => onSet(e.target.value)
+      }, col.options.map(o => /*#__PURE__*/React.createElement("option", {
+        key: o,
+        value: o
+      }, o)));
+    }
+    return /*#__PURE__*/React.createElement("input", {
+      className: `dcell ${bad ? "bad" : ""}`,
+      title: bad || "",
+      type: col.t === "num" ? "number" : "text",
+      step: "any",
+      value: value ?? "",
+      onChange: e => onSet(col.t === "num" ? num(e.target.value) : e.target.value)
+    });
+  };
+  const StateTag = ({
+    st
+  }) => st === "stock" ? null : /*#__PURE__*/React.createElement("span", {
+    className: `dtag ${st}`
+  }, st === "added" ? "CUSTOM" : "EDITED");
+
+  // ---- per-kind bodies ----
+  const recordBody = () => {
+    const keys = Object.keys(table).filter(k => !q || (k + JSON.stringify(table[k])).toLowerCase().includes(q.toLowerCase()));
+    return /*#__PURE__*/React.createElement("table", {
+      className: "dgrid"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, schema.keyLabel), schema.cols.map(c => /*#__PURE__*/React.createElement("th", {
+      key: c.k
+    }, c.label, c.unit ? /*#__PURE__*/React.createElement("span", {
+      className: "dunit"
+    }, " ", c.unit) : null)), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, keys.map(key => {
+      const row = table[key],
+        st = rowState(tab, key);
+      return /*#__PURE__*/React.createElement("tr", {
+        key: key,
+        className: errs[key] ? "rowbad" : ""
+      }, /*#__PURE__*/React.createElement("td", {
+        className: "dkey"
+      }, key, /*#__PURE__*/React.createElement(StateTag, {
+        st: st
+      })), schema.cols.map(c => /*#__PURE__*/React.createElement("td", {
+        key: c.k
+      }, /*#__PURE__*/React.createElement(Input, {
+        col: c,
+        value: row[c.k],
+        bad: cellErr(key, c.k),
+        onSet: v => commit(() => setRow(tab, key, {
+          ...row,
+          [c.k]: v
+        }))
+      }))), /*#__PURE__*/React.createElement("td", {
+        className: "dact"
+      }, st !== "stock" && /*#__PURE__*/React.createElement("button", {
+        className: "chip",
+        title: "Restore the shipped values",
+        onClick: () => commit(() => revertRow(tab, key))
+      }, "REVERT"), /*#__PURE__*/React.createElement("button", {
+        className: "chip",
+        title: "Remove from the catalog",
+        onClick: () => commit(() => dropRow(tab, key))
+      }, "DEL")));
+    })));
+  };
+  const nested2Body = () => {
+    const out = [];
+    Object.keys(table).forEach(k1 => {
+      Object.keys(table[k1]).forEach(k2 => {
+        if (q && !`${k1} ${k2} ${JSON.stringify(table[k1][k2])}`.toLowerCase().includes(q.toLowerCase())) return;
+        out.push([k1, k2]);
+      });
+    });
+    return /*#__PURE__*/React.createElement("table", {
+      className: "dgrid"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, schema.keyLabel), /*#__PURE__*/React.createElement("th", null, schema.key2Label), schema.cols.map(c => /*#__PURE__*/React.createElement("th", {
+      key: c.k
+    }, c.label, c.unit ? /*#__PURE__*/React.createElement("span", {
+      className: "dunit"
+    }, " ", c.unit) : null)), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, out.map(([k1, k2]) => {
+      const row = table[k1][k2],
+        st = rowState(tab, k1, k2),
+        ek = `${k1}\u0000${k2}`;
+      const write = patch => commit(() => setRow(tab, k1, {
+        ...table[k1],
+        [k2]: {
+          ...row,
+          ...patch
+        }
+      }));
+      return /*#__PURE__*/React.createElement("tr", {
+        key: ek,
+        className: errs[ek] ? "rowbad" : ""
+      }, /*#__PURE__*/React.createElement("td", {
+        className: "dkey"
+      }, k1), /*#__PURE__*/React.createElement("td", {
+        className: "dkey"
+      }, k2, "\"", /*#__PURE__*/React.createElement(StateTag, {
+        st: st
+      })), schema.cols.map(c => /*#__PURE__*/React.createElement("td", {
+        key: c.k
+      }, /*#__PURE__*/React.createElement(Input, {
+        col: c,
+        value: row[c.k],
+        bad: (errs[ek] || []).find(([cc]) => cc === c.k)?.[1],
+        onSet: v => write({
+          [c.k]: v
+        })
+      }))), /*#__PURE__*/React.createElement("td", {
+        className: "dact"
+      }, st !== "stock" && /*#__PURE__*/React.createElement("button", {
+        className: "chip",
+        onClick: () => commit(() => {
+          const base = CATALOG_TABLES[tab].base();
+          const restored = {
+            ...table[k1]
+          };
+          if (base[k1] && base[k1][k2] !== undefined) restored[k2] = clone(base[k1][k2]);else delete restored[k2];
+          sameJSON(restored, base[k1]) ? revertRow(tab, k1) : setRow(tab, k1, restored);
+        })
+      }, "REVERT"), /*#__PURE__*/React.createElement("button", {
+        className: "chip",
+        onClick: () => commit(() => {
+          const next = {
+            ...table[k1]
+          };
+          delete next[k2];
+          setRow(tab, k1, next);
+        })
+      }, "DEL")));
+    })));
+  };
+  const listBody = () => /*#__PURE__*/React.createElement("table", {
+    className: "dgrid"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, schema.keyLabel), /*#__PURE__*/React.createElement("th", null, "Values ", schema.text ? "(SKUs)" : "(inches)"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, Object.keys(table).filter(k => !q || k.toLowerCase().includes(q.toLowerCase())).map(key => {
+    const st = rowState(tab, key);
+    const bad = (errs[key] || [])[0];
+    return /*#__PURE__*/React.createElement("tr", {
+      key: key,
+      className: errs[key] ? "rowbad" : ""
+    }, /*#__PURE__*/React.createElement("td", {
+      className: "dkey"
+    }, key, /*#__PURE__*/React.createElement(StateTag, {
+      st: st
+    })), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("input", {
+      className: `dcell wide ${bad ? "bad" : ""}`,
+      title: bad ? bad[1] : "",
+      value: table[key].join(", "),
+      onChange: e => {
+        const parts = e.target.value.split(",").map(x => x.trim()).filter(Boolean);
+        commit(() => setRow(tab, key, schema.text ? parts : parts.map(Number)));
+      }
+    }), bad && /*#__PURE__*/React.createElement("div", {
+      className: "derr"
+    }, bad[1])), /*#__PURE__*/React.createElement("td", {
+      className: "dact"
+    }, st !== "stock" && /*#__PURE__*/React.createElement("button", {
+      className: "chip",
+      onClick: () => commit(() => revertRow(tab, key))
+    }, "REVERT"), /*#__PURE__*/React.createElement("button", {
+      className: "chip",
+      onClick: () => commit(() => dropRow(tab, key))
+    }, "DEL")));
+  })));
+  const scalarBody = () => {
+    const bad = errs.__scalars || [];
+    return /*#__PURE__*/React.createElement("table", {
+      className: "dgrid"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Setting"), /*#__PURE__*/React.createElement("th", null, "Value"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, schema.cols.map(c => {
+      const st = rowState(tab, c.k);
+      const msg = (bad.find(([k]) => k === c.k) || [])[1];
+      return /*#__PURE__*/React.createElement("tr", {
+        key: c.k,
+        className: msg ? "rowbad" : ""
+      }, /*#__PURE__*/React.createElement("td", {
+        className: "dkey"
+      }, c.label, c.unit ? /*#__PURE__*/React.createElement("span", {
+        className: "dunit"
+      }, " ", c.unit) : null, /*#__PURE__*/React.createElement(StateTag, {
+        st: st
+      })), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(Input, {
+        col: c,
+        value: table[c.k],
+        bad: msg,
+        onSet: v => commit(() => setRow(tab, c.k, v))
+      }), msg && /*#__PURE__*/React.createElement("div", {
+        className: "derr"
+      }, msg)), /*#__PURE__*/React.createElement("td", {
+        className: "dact"
+      }, st !== "stock" && /*#__PURE__*/React.createElement("button", {
+        className: "chip",
+        onClick: () => commit(() => revertRow(tab, c.k))
+      }, "REVERT")));
+    })));
+  };
+  const addRow = () => {
+    if (schema.kind === "record") {
+      let i = 1,
+        key = "CUSTOM-1";
+      while (table[key]) key = `CUSTOM-${++i}`;
+      commit(() => setRow(tab, key, clone(schema.blank)));
+    } else if (schema.kind === "nested2") {
+      const k1 = Object.keys(table)[0] || "Custom";
+      let sz = 65;
+      while ((table[k1] || {})[sz]) sz++;
+      commit(() => setRow(tab, k1, {
+        ...(table[k1] || {}),
+        [sz]: clone(schema.blank)
+      }));
+    } else if (schema.kind === "list") {
+      let i = 1,
+        key = "Custom";
+      while (table[key]) key = `Custom ${++i}`;
+      commit(() => setRow(tab, key, schema.text ? [] : [55, 65, 75]));
+    }
+  };
+  const exportOverlay = () => {
+    const blob = new Blob([JSON.stringify({
+      app: "tellavision-catalog",
+      v: 1,
+      overlay: OVERLAY
+    }, null, 2)], {
+      type: "application/json"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tellavision-catalog.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const importOverlay = file => {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const d = JSON.parse(String(r.result));
+        const ov = d && d.overlay ? d.overlay : d;
+        if (!ov || typeof ov !== "object") throw new Error("not a catalog file");
+        writeOverlay(o => {
+          Object.keys(o).forEach(k => delete o[k]);
+          Object.assign(o, ov);
+        });
+        touch();
+      } catch (e) {
+        alert("Could not read that catalog file: " + e.message);
+      }
+    };
+    r.readAsText(file);
+  };
+  const diff = overlayDiff();
+  const totalErrs = TABLE_SCHEMAS.reduce((n, sc) => n + Object.keys(validateTable(sc, eff[sc.id], eff)).length, 0);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "dwrap"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "dhead"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "rec-tag"
+  }, "CATALOG DATA"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "Measurements & Product Tables")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      flexWrap: "wrap"
+    }
+  }, overlayCount() > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "dtag edited"
+  }, overlayCount(), " LOCAL CHANGE", overlayCount() === 1 ? "" : "S"), totalErrs > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "dtag bad"
+  }, totalErrs, " PROBLEM", totalErrs === 1 ? "" : "S"), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: exportOverlay
+  }, "EXPORT"), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: () => fileRef.current && fileRef.current.click()
+  }, "IMPORT"), /*#__PURE__*/React.createElement("input", {
+    ref: fileRef,
+    type: "file",
+    accept: ".json,application/json",
+    style: {
+      display: "none"
+    },
+    onChange: e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) importOverlay(f);
+      e.target.value = "";
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: () => {
+      if (confirm("Discard every local catalog change and return to the shipped data?")) commit(resetCatalog);
+    }
+  }, "RESET ALL"), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    onClick: onClose
+  }, "DONE"))), /*#__PURE__*/React.createElement("div", {
+    className: "dbody"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "dnav"
+  }, TABLE_SCHEMAS.map(t => {
+    const d = diff[t.id];
+    const n = d ? d.added.length + d.edited.length + d.removed.length : 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: t.id,
+      className: `dnav-item ${tab === t.id ? "on" : ""}`,
+      onClick: () => {
+        setTab(t.id);
+        setQ("");
+      }
+    }, t.title, n > 0 && /*#__PURE__*/React.createElement("span", {
+      className: "dtag edited"
+    }, n));
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "dmain"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginBottom: 10
+    }
+  }, schema.hint), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginBottom: 10,
+      flexWrap: "wrap"
+    }
+  }, schema.kind !== "scalars" && /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    style: {
+      maxWidth: 220
+    },
+    placeholder: "Filter…",
+    value: q,
+    onChange: e => setQ(e.target.value)
+  }), schema.kind !== "scalars" && /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: addRow
+  }, "ADD ROW"), diff[tab] && /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: () => commit(() => resetTable(tab))
+  }, "REVERT THIS TABLE")), /*#__PURE__*/React.createElement("div", {
+    className: "dscroll"
+  }, schema.kind === "record" && recordBody(), schema.kind === "nested2" && nested2Body(), schema.kind === "list" && listBody(), schema.kind === "scalars" && scalarBody()), diff[tab] && diff[tab].removed.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 10
+    }
+  }, "Hidden from the shipped catalog: ", diff[tab].removed.join(", "), " —", " ", /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: () => commit(() => diff[tab].removed.forEach(k => revertRow(tab, k)))
+  }, "RESTORE")))));
+};
 const Icon = ({
   name,
   size = 13
@@ -3572,7 +5752,7 @@ const Sec = ({
     className: "sec-sum"
   }, !open && summary ? summary : ""), /*#__PURE__*/React.createElement("span", {
     className: `sec-chev ${open ? "" : "closed"}`
-  }, "\u25BE")), open && children);
+  }, "▾")), open && children);
 };
 const Field = ({
   label,
@@ -3639,7 +5819,7 @@ function App() {
   const [sanusMountModel, setSanusMountModel] = useState(SANUS_MOUNTS[SAVED.sanusMountModel] ? SAVED.sanusMountModel : "auto");
   const [tvWeight, setTvWeight] = useState(SAVED.tvWeight ?? "");
   const [showBackBox, setShowBackBox] = useState(SAVED.showBackBox ?? true);
-  const [backBoxModel, setBackBoxModel] = useState(BACK_BOXES[SAVED.backBoxModel] ? SAVED.backBoxModel : "FA-WB26");
+  const [backBoxModel, setBackBoxModel] = useState(BACK_BOXES[canonBoxKey(SAVED.backBoxModel)] ? canonBoxKey(SAVED.backBoxModel) : "FA-WB26");
   const [autoRecommendBox, setAutoRecommendBox] = useState(SAVED.autoRecommendBox ?? true);
   const [showOutlet, setShowOutlet] = useState(SAVED.showOutlet ?? true);
   const [showLowVolt, setShowLowVolt] = useState(SAVED.showLowVolt ?? true);
@@ -3669,6 +5849,64 @@ function App() {
   const [sweep, setSweep] = useState(null);
   const [showExport, setShowExport] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
+
+  // --- reference underlay + markup ---
+  // `underlay` holds calibration in state; the bitmap is merged in from
+  // IndexedDB on mount (localStorage can't hold a page render).
+  const [underlay, setUnderlay] = useState(null);
+  const [underlayNote, setUnderlayNote] = useState(null);
+  const [markup, setMarkup] = useState(Array.isArray(SAVED.markup) ? SAVED.markup : []);
+  const [tool, setTool] = useState("off"); // "off" | "move" | one of MARKUP_TOOLS
+  const [trace, setTrace] = useState(SAVED.trace !== false); // ink tuned for tracing over a scan
+  const [showData, setShowData] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [startHidden, setStartHidden] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [catalogRev, setCatalogRev] = useState(0); // bumped when the catalog is edited
+  const [mkColor, setMkColor] = useState(MARKUP_COLORS.includes(SAVED.mkColor) ? SAVED.mkColor : MARKUP_COLORS[0]);
+  const [mkWidth, setMkWidth] = useState(MARKUP_WIDTHS.includes(SAVED.mkWidth) ? SAVED.mkWidth : 2);
+  const [draft, setDraft] = useState(null); // stroke in progress
+  const [calib, setCalib] = useState(null); // { mode: "two" | "box", pts: [] }
+  const [calibAsk, setCalibAsk] = useState(null);
+  const [textAsk, setTextAsk] = useState(null);
+  const [askValue, setAskValue] = useState("");
+  const dragRef = useRef(null);
+  const underlayFileRef = useRef(null);
+  // Pending picks and the in-progress stroke live in refs, not state: a fast
+  // tap or flick can fire down/move/up inside a single React batch, where a
+  // stale closure would silently drop the gesture. State mirrors them for
+  // rendering only.
+  const calibPtsRef = useRef([]);
+  const draftRef = useRef(null);
+  const [sel, setSel] = useState([]); // indices into markup (multi-select)
+  const [snapOn, setSnapOn] = useState(SAVED.snapOn !== false);
+  const [snapHit, setSnapHit] = useState(null); // live "why it jumped" guides
+  const [lasso, setLasso] = useState(null); // rubber-band rectangle
+  const [cropping, setCropping] = useState(false);
+  const editRef = useRef(null); // in-flight move/reshape
+
+  // restore the saved bitmap once, then re-attach the saved calibration
+  useEffect(() => {
+    if (!SAVED.underlay) return;
+    let dead = false;
+    idbGet("current").then(rec => {
+      if (dead || !rec || !rec.src) return;
+      setUnderlay({
+        opacity: 0.75,
+        visible: true,
+        ...SAVED.underlay,
+        src: rec.src,
+        natW: rec.natW,
+        natH: rec.natH,
+        name: rec.name,
+        page: rec.page,
+        pages: rec.pages
+      });
+    }).catch(() => {});
+    return () => {
+      dead = true;
+    };
+  }, []);
   useEffect(() => {
     const onResize = () => setViewportW(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -3678,7 +5916,17 @@ function App() {
   const isTablet = viewportW >= 768 && viewportW < 1024;
   useEffect(() => {
     try {
+      const {
+        src,
+        ...underlayMeta
+      } = underlay || {};
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        markup,
+        mkColor,
+        mkWidth,
+        trace,
+        snapOn,
+        underlay: underlay ? underlayMeta : null,
         wallW,
         wallH,
         hasFireplace,
@@ -3718,13 +5966,13 @@ function App() {
         dispUnits
       }));
     } catch {/* storage unavailable — run without persistence */}
-  }, [wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
+  }, [markup, mkColor, mkWidth, trace, snapOn, underlay, wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
   const resetAll = () => {
     try {
       window.localStorage.removeItem(STORAGE_KEY);
       window.localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch {}
-    window.location.reload();
+    idbDel("current").catch(() => {}).then(() => window.location.reload());
   };
 
   // ----- engine wiring (thin memos around pure functions) -----
@@ -3742,25 +5990,30 @@ function App() {
     mantelH,
     fbOpeningH,
     useViewDist,
-    viewDist
+    viewDist,
+    catalogRev
   };
+
+  // NOTE: catalogRev is a dependency of every memo below that touches the
+  // catalog tables — editing data in the Data screen has to repaint the
+  // drawing, and these memos would otherwise hold stale dimensions.
   const recommendations = useMemo(() => computeRecommendations({
     brand,
     ...engineInputs
-  }), [brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
+  }), [brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, catalogRev]);
   const recommendedCenterH = useMemo(() => computeRecommendedCenterH({
     selectedSize,
     ...engineInputs
-  }), [selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist]);
+  }), [selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, catalogRev]);
   const centerH = useMemo(() => computeCenterH({
     mountHeightOverride,
     heightRef,
     recommendedCenterH,
     selectedSize,
     brand
-  }), [mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand]);
-  const recommendedBox = useMemo(() => recommendBackBox(selectedSize, mountSystem, brand), [selectedSize, mountSystem, brand]);
-  const recommendedMount = useMemo(() => recommendSanusMount(selectedSize, sanusStyle, brand), [selectedSize, sanusStyle, brand]);
+  }), [mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand, catalogRev]);
+  const recommendedBox = useMemo(() => recommendBackBox(selectedSize, mountSystem, brand), [selectedSize, mountSystem, brand, catalogRev]);
+  const recommendedMount = useMemo(() => recommendSanusMount(selectedSize, sanusStyle, brand), [selectedSize, sanusStyle, brand, catalogRev]);
   const sanusMount = useMemo(() => {
     if (mountSystem !== "sanus") return null;
     if (sanusMountModel === "auto") return recommendedMount;
@@ -3774,7 +6027,7 @@ function App() {
       vesaOk: !spec || spec.w_mm <= m.vesaMaxW && spec.h_mm <= m.vesaMaxH,
       styleFallback: false
     };
-  }, [mountSystem, sanusMountModel, recommendedMount, selectedSize, brand]);
+  }, [mountSystem, sanusMountModel, recommendedMount, selectedSize, brand, catalogRev]);
   const tvWeightLbs = parseFloat(tvWeight) || 0;
   const effectiveBoxModel = autoRecommendBox && recommendedBox ? recommendedBox : backBoxModel;
   const vesaSpec = selectedSize ? VESA_DATA[brand]?.[selectedSize] || null : null;
@@ -3793,7 +6046,7 @@ function App() {
     effectiveBoxModel,
     mountSystem,
     sanusMount
-  }), [selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountSystem, sanusMount]);
+  }), [selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountSystem, sanusMount, catalogRev]);
   const placementIssues = useMemo(() => computePlacementIssues({
     layout,
     wallW,
@@ -3840,15 +6093,19 @@ function App() {
     dispUnits,
     isMobile,
     isTablet,
-    viewportW
+    viewportW,
+    underlay,
+    markup,
+    trace,
+    catalogRev
   };
-  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW]);
+  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev]);
   const printSchem = useMemo(() => buildSchematic({
     ...schemState,
     isMobile: false,
     isTablet: false,
     viewportW: 1280
-  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits]);
+  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, underlay, markup, trace, catalogRev]);
   const svgRef = useRef(null);
   const printRef = useRef(null);
   const fileRef = useRef(null);
@@ -3890,6 +6147,454 @@ function App() {
     }, 150);
     return () => clearTimeout(id);
   }, [screenSchem]);
+
+  // ----- reference underlay: import, calibrate, annotate -----------------
+  const pdfBufRef = useRef(null); // kept so the page picker can re-render
+
+  const stashUnderlay = rec => {
+    idbSet("current", {
+      src: rec.src,
+      natW: rec.natW,
+      natH: rec.natH,
+      name: rec.name,
+      page: rec.page,
+      pages: rec.pages
+    }).catch(() => setUnderlayNote("Imported, but too large to save offline — it won't survive a reload"));
+  };
+  const adoptRaster = (raster, name, page) => {
+    const fit = fitUnderlay(raster.natW, raster.natH, wallW, wallH);
+    const rec = {
+      src: raster.src,
+      natW: raster.natW,
+      natH: raster.natH,
+      name,
+      page,
+      pages: raster.pages,
+      ...fit,
+      opacity: 0.75,
+      visible: true,
+      fitSheet: false
+    };
+    setUnderlay(rec);
+    stashUnderlay(rec);
+    setTool("off");
+    setUnderlayNote(`${name}${raster.pages > 1 ? ` · page ${page}/${raster.pages}` : ""} — now calibrate the scale`);
+  };
+  const importUnderlay = async file => {
+    setUnderlayNote("Reading…");
+    try {
+      if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") {
+        const buf = await file.arrayBuffer();
+        pdfBufRef.current = new Uint8Array(buf);
+        const raster = await rasterizePdfPage(pdfBufRef.current.slice().buffer, 1);
+        adoptRaster(raster, file.name, 1);
+      } else {
+        pdfBufRef.current = null;
+        const raster = await rasterizeImageFile(file);
+        adoptRaster(raster, file.name, 1);
+      }
+    } catch (err) {
+      setUnderlayNote(err && err.message ? err.message : "Could not import that file");
+    }
+  };
+
+  // Page switching keeps the current calibration — a multi-page set is normally
+  // plotted at one scale, so re-calibrating every page would be busywork.
+  const gotoPage = async n => {
+    if (!pdfBufRef.current || !underlay) return;
+    setUnderlayNote("Rendering page " + n + "…");
+    try {
+      const raster = await rasterizePdfPage(pdfBufRef.current.slice().buffer, n);
+      const keep = raster.natW === underlay.natW && raster.natH === underlay.natH;
+      const fit = keep ? {} : fitUnderlay(raster.natW, raster.natH, wallW, wallH);
+      const rec = {
+        ...underlay,
+        src: raster.src,
+        natW: raster.natW,
+        natH: raster.natH,
+        page: n,
+        pages: raster.pages,
+        ...fit
+      };
+      setUnderlay(rec);
+      stashUnderlay(rec);
+      setUnderlayNote(keep ? `Page ${n}/${raster.pages} — calibration kept` : `Page ${n}/${raster.pages} — different page size, re-calibrate`);
+    } catch (err) {
+      setUnderlayNote(err && err.message ? err.message : "Could not render that page");
+    }
+  };
+  const clearUnderlay = () => {
+    setUnderlay(null);
+    setCalib(null);
+    setTool("off");
+    setUnderlayNote(null);
+    pdfBufRef.current = null;
+    idbDel("current").catch(() => {});
+  };
+
+  // --- screen <-> wall-inch mapping (all interaction happens in inches) ---
+  const svgPt = e => {
+    const el = svgRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {
+      x: (e.clientX - r.left) * (screenSchem.svgW / r.width),
+      y: (e.clientY - r.top) * (screenSchem.svgH / r.height)
+    };
+  };
+  const toIn = p => ({
+    x: (p.x - screenSchem.wallX) / screenSchem.scale,
+    y: (screenSchem.floorY - p.y) / screenSchem.scale
+  });
+  const toPx = q => ({
+    x: screenSchem.wallX + q.x * screenSchem.scale,
+    y: screenSchem.floorY - q.y * screenSchem.scale
+  });
+  const interactive = tool !== "off" || !!calib || cropping;
+  // A grab radius that feels the same at any drawing scale.
+  const grabIn = () => 9 / Math.max(screenSchem.scale, 0.001);
+  const patchSel = fn => setMarkup(ms => ms.map((m, i) => sel.includes(i) ? fn(m) : m));
+  const deleteSel = () => {
+    setMarkup(ms => ms.filter((_, i) => !sel.includes(i)));
+    setSel([]);
+  };
+  const solo = sel.length === 1 ? markup[sel[0]] : null; // handles only make sense on one item
+
+  // Snap a point unless the user has turned snapping off (or holds Alt).
+  const snap = (q, other, e) => {
+    if (!snapOn || e && e.altKey) {
+      setSnapHit(null);
+      return q;
+    }
+    const r = snapPoint(q, snapAnchors(layout, wallW, wallH), grabIn(), other);
+    setSnapHit(r.hitX || r.hitY ? {
+      x: r.hitX,
+      y: r.hitY,
+      at: r
+    } : null);
+    return {
+      x: r.x,
+      y: r.y
+    };
+  };
+  const applyTwoPoint = () => {
+    const v = parseLenIn(askValue);
+    if (!underlay || !calibAsk || !(v > 0)) {
+      setUnderlayNote('Enter a length like 96, 8\' or 8\' 6"');
+      return;
+    }
+    const next = calibrateTwoPoint(underlay, calibAsk.p1, calibAsk.p2, v);
+    if (next) setUnderlay(next);
+    setUnderlayNote(next ? `Calibrated — that span now reads ${fmtIn(v, dispUnits)}` : "Pick two separated points");
+    setCalibAsk(null);
+    setCalib(null);
+    calibPtsRef.current = [];
+    setAskValue("");
+    setTool("off");
+  };
+  const applyBoxCalib = (a, b) => {
+    if (!underlay || !selectedSize) {
+      setCalib(null);
+      return;
+    }
+    const realW = tvDimsFor(brand, selectedSize).w;
+    const target = layout ? {
+      x: layout.tvCL,
+      y: layout.centerH
+    } : null;
+    const next = calibrateToBox(underlay, {
+      x1: a.x,
+      y1: a.y,
+      x2: b.x,
+      y2: b.y
+    }, realW, target);
+    if (next) {
+      setUnderlay(next);
+      setUnderlayNote(`Snapped to the ${selectedSize}" panel — ${fmtIn(realW, dispUnits)} across`);
+    }
+    setCalib(null);
+    calibPtsRef.current = [];
+    setTool("off");
+  };
+  const onPtrDown = e => {
+    if (!interactive) return;
+    const p = svgPt(e);
+    if (!p) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    const q = toIn(p);
+    if (calib) {
+      if (calib.mode === "box") {
+        dragRef.current = {
+          box: true
+        };
+        calibPtsRef.current = [q, q];
+        setCalib(c => c && {
+          ...c,
+          pts: [q, q]
+        });
+      } else {
+        const pts = [...calibPtsRef.current, q].slice(-2);
+        calibPtsRef.current = pts;
+        setCalib(c => c && {
+          ...c,
+          pts,
+          hover: null
+        });
+        if (pts.length === 2) {
+          setCalibAsk({
+            p1: pts[0],
+            p2: pts[1]
+          });
+          setAskValue("");
+        }
+      }
+      return;
+    }
+    if (tool === "move") {
+      dragRef.current = {
+        start: q,
+        ox: underlay?.ox ?? 0,
+        oy: underlay?.oy ?? 0
+      };
+      return;
+    }
+    if (cropping) {
+      dragRef.current = {
+        crop: true,
+        a: q,
+        b: q
+      };
+      setLasso({
+        a: q,
+        b: q
+      });
+      return;
+    }
+    if (tool === "select") {
+      const tol = grabIn();
+      // a handle on a single selected item beats everything else
+      if (solo) {
+        const h = handlesFor(solo).find(pt => Math.hypot(q.x - pt.x, q.y - pt.y) <= tol * 1.3);
+        if (h) {
+          editRef.current = {
+            mode: "handle",
+            ix: h.ix,
+            idx: sel[0]
+          };
+          return;
+        }
+      }
+      const hit = hitMarkup(markup, q, tol);
+      if (hit < 0) {
+        // empty space starts a rubber-band rather than doing nothing
+        if (!e.shiftKey) setSel([]);
+        editRef.current = {
+          mode: "lasso",
+          a: q,
+          add: e.shiftKey ? sel : []
+        };
+        setLasso({
+          a: q,
+          b: q
+        });
+        return;
+      }
+      const next = e.shiftKey ? sel.includes(hit) ? sel.filter(i => i !== hit) : [...sel, hit] : sel.includes(hit) ? sel : [hit];
+      setSel(next);
+      editRef.current = {
+        mode: "body",
+        idx: next,
+        last: q
+      };
+      return;
+    }
+    if (tool === "text") {
+      setTextAsk({
+        pt: q
+      });
+      setAskValue("");
+      return;
+    }
+    const q0 = snap(q, null, e);
+    const started = {
+      id: `m${markup.length}-${Math.round(q0.x * 100)}`,
+      type: tool,
+      color: mkColor,
+      w: mkWidth,
+      pts: [q0, q0]
+    };
+    draftRef.current = started;
+    setDraft(started);
+  };
+  const onPtrMove = e => {
+    if (!interactive) return;
+    const p = svgPt(e);
+    if (!p) return;
+    const q = toIn(p);
+    if (calib) {
+      if (calib.mode === "box" && dragRef.current && dragRef.current.box) {
+        const a0 = calibPtsRef.current[0] || q;
+        calibPtsRef.current = [a0, q];
+        setCalib(c => c && {
+          ...c,
+          pts: [a0, q]
+        });
+      } else if (calib.mode === "two" && calib.pts.length === 1) setCalib(c => c && {
+        ...c,
+        hover: q
+      });
+      return;
+    }
+    if (dragRef.current && dragRef.current.crop) {
+      dragRef.current.b = q;
+      setLasso({
+        a: dragRef.current.a,
+        b: q
+      });
+      return;
+    }
+    if (tool === "select") {
+      const ed = editRef.current;
+      if (!ed) return;
+      if (ed.mode === "lasso") {
+        ed.b = q;
+        setLasso({
+          a: ed.a,
+          b: q
+        });
+        return;
+      }
+      if (ed.mode === "handle") {
+        const m0 = markup[ed.idx];
+        const other = m0 && m0.pts.length === 2 ? m0.pts[1 - ed.ix] : null;
+        const qs = snap(q, m0 && m0.type !== "rect" && m0.type !== "mask" ? other : null, e);
+        setMarkup(ms => ms.map((m, i) => i === ed.idx ? moveHandle(m, ed.ix, qs) : m));
+      } else {
+        const dx = q.x - ed.last.x,
+          dy = q.y - ed.last.y;
+        ed.last = q;
+        setMarkup(ms => ms.map((m, i) => ed.idx.includes(i) ? translateMarkup(m, dx, dy) : m));
+      }
+      return;
+    }
+    if (tool === "move" && dragRef.current && underlay) {
+      const d = dragRef.current;
+      setUnderlay(u => u && {
+        ...u,
+        ox: d.ox + (q.x - d.start.x),
+        oy: d.oy + (q.y - d.start.y)
+      });
+      return;
+    }
+    const cur = draftRef.current;
+    if (!cur) return;
+    const qs = cur.type === "pen" ? q : snap(q, cur.type === "rect" || cur.type === "mask" ? null : cur.pts[0], e);
+    const next = cur.type === "pen" ? {
+      ...cur,
+      pts: [...cur.pts, q]
+    } : {
+      ...cur,
+      pts: [cur.pts[0], qs]
+    };
+    draftRef.current = next;
+    setDraft(next);
+  };
+  const onPtrUp = () => {
+    if (calib && calib.mode === "box" && dragRef.current && dragRef.current.box) {
+      dragRef.current = null;
+      const [a, b] = calibPtsRef.current || [];
+      calibPtsRef.current = [];
+      if (a && b && Math.abs(b.x - a.x) > 0.5) applyBoxCalib(a, b);else setCalib(c => c && {
+        ...c,
+        pts: []
+      });
+      return;
+    }
+    if (dragRef.current && dragRef.current.crop) {
+      const l = dragRef.current;
+      dragRef.current = null;
+      setLasso(null);
+      setCropping(false);
+      if (l && underlay) {
+        const x = Math.min(l.a.x, l.b.x),
+          y = Math.min(l.a.y, l.b.y);
+        const w = Math.abs(l.b.x - l.a.x),
+          h = Math.abs(l.b.y - l.a.y);
+        if (w > 1 && h > 1) {
+          setUnderlay(u => u && {
+            ...u,
+            crop: {
+              x,
+              y,
+              w,
+              h
+            }
+          });
+          setUnderlayNote("Sheet cropped — everything outside the box is hidden");
+        }
+      }
+      return;
+    }
+    if (tool === "select") {
+      const ed = editRef.current;
+      if (ed && ed.mode === "lasso" && ed.b) {
+        const x1 = Math.min(ed.a.x, ed.b.x),
+          x2 = Math.max(ed.a.x, ed.b.x);
+        const y1 = Math.min(ed.a.y, ed.b.y),
+          y2 = Math.max(ed.a.y, ed.b.y);
+        const inside = [];
+        markup.forEach((m, i) => {
+          if (!m || !m.pts || !m.pts.length) return;
+          if (m.pts.some(pt => pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2)) inside.push(i);
+        });
+        setSel([...new Set([...(ed.add || []), ...inside])]);
+      }
+      setLasso(null);
+      setSnapHit(null);
+      editRef.current = null;
+      dragRef.current = null;
+      return;
+    }
+    setSnapHit(null);
+    dragRef.current = null;
+    const cur = draftRef.current;
+    if (!cur) return;
+    draftRef.current = null;
+    const done = cur.type === "pen" ? {
+      ...cur,
+      pts: simplifyPts(cur.pts)
+    } : cur;
+    setDraft(null);
+    if (done.type === "pen" ? done.pts.length > 1 : markupSpan(done) > 0.5) setMarkup(m => [...m, done]);
+  };
+  const undoMarkup = () => {
+    setMarkup(m => m.slice(0, -1));
+    setSel([]);
+  };
+
+  // Delete / Escape while a markup item is picked. Ignored while typing.
+  useEffect(() => {
+    if (tool !== "select") return;
+    const onKey = e => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      if (e.key === "Escape") {
+        setSel([]);
+        setLasso(null);
+        setCropping(false);
+        editRef.current = null;
+      } else if ((e.key === "Delete" || e.key === "Backspace") && sel.length) {
+        e.preventDefault();
+        deleteSel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tool, sel]);
 
   // ----- exports (always from the print/blueline render) -----
   const exportName = ext => {
@@ -3946,7 +6651,14 @@ function App() {
     projectName,
     clientName,
     revision,
-    dispUnits
+    dispUnits,
+    markup,
+    // calibration only — the bitmap itself stays in IndexedDB, so a shared
+    // JSON re-imports the annotations and scale but not the drawing
+    underlay: underlay ? (({
+      src,
+      ...meta
+    }) => meta)(underlay) : null
   };
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(buildExportJSON(designState, layout), null, 2)], {
@@ -3982,7 +6694,8 @@ function App() {
       heightRef,
       projectName,
       clientName,
-      revision
+      revision,
+      markup
     }, layout);
     const blob = new Blob([dxf], {
       type: "application/dxf"
@@ -4036,7 +6749,7 @@ function App() {
     if (SANUS_MOUNTS[f.sanusMountModel]) setSanusMountModel(f.sanusMountModel);
     if (typeof f.tvWeight === "string") setTvWeight(f.tvWeight);
     if (typeof f.showBackBox === "boolean") setShowBackBox(f.showBackBox);
-    if (BACK_BOXES[f.backBoxModel]) setBackBoxModel(f.backBoxModel);
+    if (BACK_BOXES[canonBoxKey(f.backBoxModel)]) setBackBoxModel(canonBoxKey(f.backBoxModel));
     if (typeof f.autoRecommendBox === "boolean") setAutoRecommendBox(f.autoRecommendBox);
     if (typeof f.showOutlet === "boolean") setShowOutlet(f.showOutlet);
     if (typeof f.showLowVolt === "boolean") setShowLowVolt(f.showLowVolt);
@@ -4081,6 +6794,29 @@ function App() {
       }
     };
     reader.readAsText(file);
+  };
+
+  // Every entry point — the IMPORT menu, a drag-drop, the start panel — lands
+  // here. A drawing and a data file are different jobs, so we route on type
+  // rather than making the user pre-declare which one they have.
+  const looksLikeDrawing = f => /\.(pdf|png|jpe?g|webp|gif|heic|heif)$/i.test(f.name) || /^image\//.test(f.type) || f.type === "application/pdf";
+  const looksLikeData = f => /\.json$/i.test(f.name) || f.type === "application/json";
+  const routeFiles = list => {
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    const drawing = files.find(looksLikeDrawing);
+    const data = files.find(looksLikeData);
+    if (drawing) importUnderlay(drawing);
+    if (data) importJSONFile(data);
+    if (!drawing && !data) {
+      setImportSummary({
+        matched: [],
+        ignored: files.length,
+        native: false,
+        notes: [`Not something this app can read: ${files.map(f => f.name).join(", ")}`, "Drop a PDF or image to trace over, or a JSON design / survey file"]
+      });
+    }
+    setStartHidden(true);
   };
   const exportPNG = () => {
     if (!printRef.current) return;
@@ -4236,10 +6972,15 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   const auditClean = renderAudit.overlaps === 0 && renderAudit.clipped === 0;
 
   // ----- shared UI fragments -----
-  const setupPanel = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Sec, {
+  const setupPanel = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "stage"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "stage-name"
+  }, "START"), /*#__PURE__*/React.createElement("span", {
+    className: "stage-note"
+  }, "what you are working from")), /*#__PURE__*/React.createElement(Sec, {
     icon: "doc",
     title: "Project",
-    first: true,
     defaultOpen: !SAVED.projectName,
     summary: [projectName, clientName].filter(Boolean).join(" — ")
   }, /*#__PURE__*/React.createElement(Field, {
@@ -4272,6 +7013,166 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     value: revision,
     onChange: e => setRevision(e.target.value)
   })))), /*#__PURE__*/React.createElement(Sec, {
+    icon: "doc",
+    title: "Reference Drawing",
+    defaultOpen: !!underlay,
+    summary: underlay ? `${underlay.name || "imported"}${underlay.pages > 1 ? ` p${underlay.page}/${underlay.pages}` : ""}` : "none"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    style: {
+      width: "100%"
+    },
+    onClick: () => underlayFileRef.current && underlayFileRef.current.click()
+  }, underlay ? "REPLACE PDF / IMAGE" : "IMPORT PDF / IMAGE"), /*#__PURE__*/React.createElement("input", {
+    ref: underlayFileRef,
+    type: "file",
+    accept: "application/pdf,.pdf,image/*",
+    style: {
+      display: "none"
+    },
+    onChange: e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) importUnderlay(f);
+      e.target.value = "";
+    }
+  }), underlayNote && /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 8,
+      color: "var(--acc)"
+    }
+  }, underlayNote), underlay && /*#__PURE__*/React.createElement(React.Fragment, null, underlay.pages > 1 && /*#__PURE__*/React.createElement(Field, {
+    label: `Page (${underlay.pages} total)`,
+    hint: pdfBufRef.current ? null : "Re-import the PDF to switch pages after a reload"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    disabled: !pdfBufRef.current || underlay.page <= 1,
+    onClick: () => gotoPage(underlay.page - 1)
+  }, "PREV"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: "var(--fm)",
+      fontSize: 11,
+      minWidth: 46,
+      textAlign: "center"
+    }
+  }, underlay.page, " / ", underlay.pages), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    disabled: !pdfBufRef.current || underlay.page >= underlay.pages,
+    onClick: () => gotoPage(underlay.page + 1)
+  }, "NEXT"))), /*#__PURE__*/React.createElement(Field, {
+    label: "Calibrate scale"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `chip ${calib?.mode === "two" ? "on" : ""}`,
+    onClick: () => startCalib("two")
+  }, "2-POINT"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${calib?.mode === "box" ? "on" : ""}`,
+    onClick: () => startCalib("box")
+  }, "SNAP TO TV"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${tool === "move" ? "on" : ""}`,
+    onClick: () => pickTool("move")
+  }, "MOVE"))), /*#__PURE__*/React.createElement(Field, {
+    label: `Fine scale — ${(underlay.natW / underlay.ppi).toFixed(1)}" wide`,
+    hint: "Nudge after calibrating; anchored on the drawing's centre"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: () => setUnderlay(u => u && rescaleUnderlay(u, 0.99, {
+      x: u.ox + underlayInW(u) / 2,
+      y: u.oy - underlayInH(u) / 2
+    }))
+  }, "−1%"), /*#__PURE__*/React.createElement("input", {
+    type: "range",
+    min: "-20",
+    max: "20",
+    step: "1",
+    value: 0,
+    style: {
+      flex: 1
+    },
+    onChange: e => {
+      const k = 1 + +e.target.value / 200;
+      setUnderlay(u => u && rescaleUnderlay(u, k, {
+        x: u.ox + underlayInW(u) / 2,
+        y: u.oy - underlayInH(u) / 2
+      }));
+      e.target.value = 0;
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: () => setUnderlay(u => u && rescaleUnderlay(u, 1.01, {
+      x: u.ox + underlayInW(u) / 2,
+      y: u.oy - underlayInH(u) / 2
+    }))
+  }, "+1%"))), /*#__PURE__*/React.createElement(Field, {
+    label: `Opacity — ${Math.round((underlay.opacity ?? 0.75) * 100)}%`
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "range",
+    min: "10",
+    max: "100",
+    step: "5",
+    value: Math.round((underlay.opacity ?? 0.75) * 100),
+    style: {
+      width: "100%"
+    },
+    onChange: e => setUnderlay(u => u && {
+      ...u,
+      opacity: +e.target.value / 100
+    })
+  })), /*#__PURE__*/React.createElement(Check, {
+    on: underlay.visible !== false,
+    onClick: () => setUnderlay(u => u && {
+      ...u,
+      visible: u.visible === false
+    })
+  }, "Show reference drawing"), /*#__PURE__*/React.createElement(Check, {
+    on: trace,
+    onClick: () => setTrace(!trace)
+  }, "Trace ink — dark lines, hollow TV"), /*#__PURE__*/React.createElement(Check, {
+    on: !!underlay.fitSheet,
+    onClick: () => setUnderlay(u => u && {
+      ...u,
+      fitSheet: !u.fitSheet
+    })
+  }, "Show whole sheet (shrinks the schematic)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    title: "Start calibration over — discards the current scale",
+    onClick: () => setUnderlay(u => u && {
+      ...u,
+      ...fitUnderlay(u.natW, u.natH, wallW, wallH)
+    })
+  }, "RESET SCALE"), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: clearUnderlay
+  }, "REMOVE")))), /*#__PURE__*/React.createElement("div", {
+    className: "stage"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "stage-name"
+  }, "THE WALL"), /*#__PURE__*/React.createElement("span", {
+    className: "stage-note"
+  }, "the surface it goes on")), /*#__PURE__*/React.createElement(Sec, {
     icon: "wall",
     title: "Wall",
     summary: `${wallW}" × ${wallH}"`
@@ -4329,7 +7230,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     onChange: e => setFbOpeningH(+e.target.value || 0)
   }))), /*#__PURE__*/React.createElement(Field, {
     label: "Offset from wall center (in)",
-    hint: "+ right / \u2212 left \u2014 TV follows fireplace center"
+    hint: "+ right / − left — TV follows fireplace center"
   }, /*#__PURE__*/React.createElement("input", {
     className: "inp",
     type: "number",
@@ -4360,22 +7261,13 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     type: "number",
     value: mantelDepth,
     onChange: e => setMantelDepth(+e.target.value || 0)
-  }))))), /*#__PURE__*/React.createElement(Sec, {
-    icon: "eye",
-    title: "Viewing",
-    summary: useViewDist ? `${(viewDist / 12).toFixed(1)} ft` : "off"
-  }, /*#__PURE__*/React.createElement(Check, {
-    on: useViewDist,
-    onClick: () => setUseViewDist(!useViewDist)
-  }, "Factor viewing distance"), useViewDist && /*#__PURE__*/React.createElement(Field, {
-    label: "Distance to seating (in)",
-    hint: `${(viewDist / 12).toFixed(1)} ft — sizing guide only`
-  }, /*#__PURE__*/React.createElement("input", {
-    className: "inp",
-    type: "number",
-    value: viewDist,
-    onChange: e => setViewDist(+e.target.value || 0)
-  }))), /*#__PURE__*/React.createElement(Sec, {
+  }))))), /*#__PURE__*/React.createElement("div", {
+    className: "stage"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "stage-name"
+  }, "THE TV"), /*#__PURE__*/React.createElement("span", {
+    className: "stage-note"
+  }, "what you are hanging")), /*#__PURE__*/React.createElement(Sec, {
     icon: "tv",
     title: "Brand",
     summary: brand
@@ -4390,6 +7282,27 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       setSelectedSize(null);
     }
   })), /*#__PURE__*/React.createElement(Sec, {
+    icon: "eye",
+    title: "Viewing",
+    summary: useViewDist ? `${(viewDist / 12).toFixed(1)} ft` : "off"
+  }, /*#__PURE__*/React.createElement(Check, {
+    on: useViewDist,
+    onClick: () => setUseViewDist(!useViewDist)
+  }, "Factor viewing distance"), useViewDist && /*#__PURE__*/React.createElement(Field, {
+    label: "Distance to seating (in)",
+    hint: `${(viewDist / 12).toFixed(1)} ft — sizing guide only`
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    type: "number",
+    value: viewDist,
+    onChange: e => setViewDist(+e.target.value || 0)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "stage"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "stage-name"
+  }, "THE HARDWARE"), /*#__PURE__*/React.createElement("span", {
+    className: "stage-note"
+  }, "what holds it up")), /*#__PURE__*/React.createElement(Sec, {
     icon: "mount",
     title: "Mount",
     summary: mountSystem === "fa" ? "Future Automation" : `Sanus ${sanusStyle === "fullmotion" ? "full motion" : sanusStyle}`
@@ -4409,7 +7322,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       marginTop: 6,
       marginBottom: 14
     }
-  }, "FA articulating bracket + WB back box. The box location dictates the TV position \u2014 see Back Box."), mountSystem === "sanus" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "FA articulating bracket + WB back box. The box location dictates the TV position — see Back Box."), mountSystem === "sanus" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 8
     }
@@ -4437,13 +7350,13 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     style: {
       fontWeight: 600
     }
-  }, "Sanus Black ", sanusMount.model), /*#__PURE__*/React.createElement("div", null, sanusMount.name, " \xB7 ", sanusMount.tvMin, "\"\u2013", sanusMount.tvMax, "\" \xB7 ", sanusMount.capLbs, " lbs"), /*#__PURE__*/React.createElement("div", {
+  }, "Sanus Black ", sanusMount.model), /*#__PURE__*/React.createElement("div", null, sanusMount.name, " · ", sanusMount.tvMin, "\"–", sanusMount.tvMax, "\" · ", sanusMount.capLbs, " lbs"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       opacity: 0.8,
       marginTop: 3
     }
-  }, "VESA to ", sanusMount.vesaMaxW, "\xD7", sanusMount.vesaMaxH, " \xB7 plate ", sanusMount.plateW, "\" \xD7 ", sanusMount.plateH, "\"", sanusMount.tilt ? ` · tilt ${sanusMount.tilt}°` : "", sanusMount.swivel ? ` · swivel ${sanusMount.swivel}°` : ""), /*#__PURE__*/React.createElement("div", {
+  }, "VESA to ", sanusMount.vesaMaxW, "×", sanusMount.vesaMaxH, " · plate ", sanusMount.plateW, "\" × ", sanusMount.plateH, "\"", sanusMount.tilt ? ` · tilt ${sanusMount.tilt}°` : "", sanusMount.swivel ? ` · swivel ${sanusMount.swivel}°` : ""), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       marginTop: 4,
@@ -4455,7 +7368,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       marginTop: 3,
       opacity: 0.85
     }
-  }, "Panel: ", specPanel.weightLbs, " lbs (spec) \u2014 ", specPanel.model), /*#__PURE__*/React.createElement("div", {
+  }, "Panel: ", specPanel.weightLbs, " lbs (spec) — ", specPanel.model), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,
       opacity: 0.6,
@@ -4465,13 +7378,13 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "warn-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "warn-title"
-  }, "NO SANUS BLACK MOUNT"), "No Black Series mount covers ", selectedSize, "\" (catalog spans 37\"\u2013110\"). Spec Future Automation or a custom solution."), selectedSize && sanusMount && !sanusMount.sizeOk && /*#__PURE__*/React.createElement("div", {
+  }, "NO SANUS BLACK MOUNT"), "No Black Series mount covers ", selectedSize, "\" (catalog spans 37\"–110\"). Spec Future Automation or a custom solution."), selectedSize && sanusMount && !sanusMount.sizeOk && /*#__PURE__*/React.createElement("div", {
     className: "warn-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "warn-title"
-  }, "SIZE OUT OF RANGE"), sanusMount.model, " is rated ", sanusMount.tvMin, "\"\u2013", sanusMount.tvMax, "\" \u2014 selected ", selectedSize, "\"."), selectedSize && sanusMount && !sanusMount.vesaOk && vesaSpec && /*#__PURE__*/React.createElement("div", {
+  }, "SIZE OUT OF RANGE"), sanusMount.model, " is rated ", sanusMount.tvMin, "\"–", sanusMount.tvMax, "\" — selected ", selectedSize, "\"."), selectedSize && sanusMount && !sanusMount.vesaOk && vesaSpec && /*#__PURE__*/React.createElement("div", {
     className: "note-box"
-  }, /*#__PURE__*/React.createElement("strong", null, "VESA check:"), " TV pattern ", vesaSpec.w_mm, "\xD7", vesaSpec.h_mm, " exceeds ", sanusMount.model, " max ", sanusMount.vesaMaxW, "\xD7", sanusMount.vesaMaxH, "."), selectedSize && sanusMount && effWeightLbs > 0 && effWeightLbs > sanusMount.capLbs && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("strong", null, "VESA check:"), " TV pattern ", vesaSpec.w_mm, "×", vesaSpec.h_mm, " exceeds ", sanusMount.model, " max ", sanusMount.vesaMaxW, "×", sanusMount.vesaMaxH, "."), selectedSize && sanusMount && effWeightLbs > 0 && effWeightLbs > sanusMount.capLbs && /*#__PURE__*/React.createElement("div", {
     className: "warn-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "warn-title"
@@ -4488,23 +7401,23 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, SANUS_STYLE_ORDER.fixed.map(k => /*#__PURE__*/React.createElement("option", {
     key: k,
     value: k
-  }, SANUS_MOUNTS[k].model, " \u2014 ", SANUS_MOUNTS[k].name))), /*#__PURE__*/React.createElement("optgroup", {
+  }, SANUS_MOUNTS[k].model, " — ", SANUS_MOUNTS[k].name))), /*#__PURE__*/React.createElement("optgroup", {
     label: "Tilt"
   }, SANUS_STYLE_ORDER.tilt.map(k => /*#__PURE__*/React.createElement("option", {
     key: k,
     value: k
-  }, SANUS_MOUNTS[k].model, " \u2014 ", SANUS_MOUNTS[k].name))), /*#__PURE__*/React.createElement("optgroup", {
+  }, SANUS_MOUNTS[k].model, " — ", SANUS_MOUNTS[k].name))), /*#__PURE__*/React.createElement("optgroup", {
     label: "Full Motion"
   }, SANUS_STYLE_ORDER.fullmotion.map(k => /*#__PURE__*/React.createElement("option", {
     key: k,
     value: k
-  }, SANUS_MOUNTS[k].model, " \u2014 ", SANUS_MOUNTS[k].name))))), /*#__PURE__*/React.createElement(Field, {
+  }, SANUS_MOUNTS[k].model, " — ", SANUS_MOUNTS[k].name))))), /*#__PURE__*/React.createElement(Field, {
     label: "TV weight (lbs, optional)",
-    hint: "From the TV spec sheet \u2014 checked against the mount rating"
+    hint: "From the TV spec sheet — checked against the mount rating"
   }, /*#__PURE__*/React.createElement("input", {
     className: "inp",
     type: "number",
-    placeholder: "for 98\u2033+ panels",
+    placeholder: "for 98″+ panels",
     value: tvWeight,
     onChange: e => setTvWeight(e.target.value)
   }))), /*#__PURE__*/React.createElement(Field, {
@@ -4546,7 +7459,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "warn-title"
   }, "PLACEMENT OUT OF RANGE"), placementIssues.map((iss, i) => /*#__PURE__*/React.createElement("div", {
     key: i
-  }, "\u2022 ", iss)))), /*#__PURE__*/React.createElement(Sec, {
+  }, "• ", iss)))), /*#__PURE__*/React.createElement(Sec, {
     icon: "box",
     title: "Back Box",
     summary: showBackBox ? layout?.box?.label || "on" : "off"
@@ -4570,7 +7483,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       opacity: 0.75,
       marginTop: 3
     }
-  }, BACK_BOXES[recommendedBox].w, "\" \xD7 ", BACK_BOXES[recommendedBox].h, "\" \xD7 ", BACK_BOXES[recommendedBox].d, "\"D \u2014 ", BACK_BOXES[recommendedBox].bracket), BACK_BOXES[recommendedBox].note && /*#__PURE__*/React.createElement("div", {
+  }, BACK_BOXES[recommendedBox].w, "\" × ", BACK_BOXES[recommendedBox].h, "\" × ", BACK_BOXES[recommendedBox].d, "\"D — ", BACK_BOXES[recommendedBox].bracket), BACK_BOXES[recommendedBox].note && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       opacity: 0.85,
@@ -4584,23 +7497,23 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     value: backBoxModel,
     onChange: e => setBackBoxModel(e.target.value)
   }, /*#__PURE__*/React.createElement("optgroup", {
-    label: "Future Automation \u2014 WB Range"
+    label: "Future Automation — WB Range"
   }, Object.entries(BACK_BOXES).filter(([, v]) => v.brand === "Future Automation").map(([k, v]) => /*#__PURE__*/React.createElement("option", {
     key: k,
     value: k
   }, v.label, " (", v.bracket, ")"))), /*#__PURE__*/React.createElement("optgroup", {
-    label: "SnapAV Strong \u2014 VersaBox"
+    label: "SnapAV Strong — VersaBox"
   }, Object.entries(BACK_BOXES).filter(([, v]) => v.brand === "SnapAV Strong").map(([k, v]) => /*#__PURE__*/React.createElement("option", {
     key: k,
     value: k
   }, v.label))))), layout?.box?.underRated && /*#__PURE__*/React.createElement("div", {
     className: "note-box"
-  }, /*#__PURE__*/React.createElement("strong", null, "Check rating:"), " ", layout.box.label, " is rated for ", layout.box.tvMin, "\"\u2013", layout.box.tvMax, "\" TVs \u2014 selected ", selectedSize, "\". Verify bracket compatibility."), mountSystem === "fa" && layout?.box?.brand === "Future Automation" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Check, {
+  }, /*#__PURE__*/React.createElement("strong", null, "Check rating:"), " ", layout.box.label, " is rated for ", layout.box.tvMin, "\"–", layout.box.tvMax, "\" TVs — selected ", selectedSize, "\". Verify bracket compatibility."), mountSystem === "fa" && layout?.box?.brand === "Future Automation" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Check, {
     on: showTravel,
     onClick: () => setShowTravel(!showTravel)
   }, "Show bracket vertical range"), showTravel && /*#__PURE__*/React.createElement(Field, {
-    label: "Bracket travel (\xB1 in)",
-    hint: "FA PS-series hook adjustment \u2014 verify with the mount spec sheet"
+    label: "Bracket travel (± in)",
+    hint: "FA PS-series hook adjustment — verify with the mount spec sheet"
   }, /*#__PURE__*/React.createElement("input", {
     className: "inp",
     type: "number",
@@ -4615,21 +7528,21 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     style: {
       marginTop: 0
     }
-  }, /*#__PURE__*/React.createElement("strong", null, "No VESA data for this panel"), " \u2014 pattern not published yet", TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : "", ". Pull it from the TV's spec sheet before rough-in."), vesaSpec && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("strong", null, "No VESA data for this panel"), " — pattern not published yet", TV_OVERRIDES[brand]?.[selectedSize] ? ` (${TV_OVERRIDES[brand][selectedSize].model})` : "", ". Pull it from the TV's spec sheet before rough-in."), vesaSpec && /*#__PURE__*/React.createElement("div", {
     className: "vesa-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "rec-tag"
-  }, brand.toUpperCase(), " ", selectedSize, "\" \xB7 2024/25"), /*#__PURE__*/React.createElement("div", {
+  }, brand.toUpperCase(), " ", selectedSize, "\" · 2024/25"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 600,
       fontSize: 13
     }
-  }, vesaSpec.w_mm, " \xD7 ", vesaSpec.h_mm, " mm"), /*#__PURE__*/React.createElement("div", {
+  }, vesaSpec.w_mm, " × ", vesaSpec.h_mm, " mm"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       marginTop: 2
     }
-  }, mmToIn(vesaSpec.w_mm).toFixed(2), "\" \xD7 ", mmToIn(vesaSpec.h_mm).toFixed(2), "\" \u2014 ", vesaSpec.screw, " screw"), vesaSpec.voffset_pct !== 0 && /*#__PURE__*/React.createElement("div", {
+  }, mmToIn(vesaSpec.w_mm).toFixed(2), "\" × ", mmToIn(vesaSpec.h_mm).toFixed(2), "\" — ", vesaSpec.screw, " screw"), vesaSpec.voffset_pct !== 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       marginTop: 3
@@ -4679,7 +7592,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     style: {
       padding: 12
     }
-  }, "No sizes fit these dimensions \u2014 adjust the wall or enable SHOW ALL.")), selectedSize && !recommendations.includes(selectedSize) && /*#__PURE__*/React.createElement("div", {
+  }, "No sizes fit these dimensions — adjust the wall or enable SHOW ALL.")), selectedSize && !recommendations.includes(selectedSize) && /*#__PURE__*/React.createElement("div", {
     className: "warn-box",
     style: {
       marginTop: 8
@@ -4688,7 +7601,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "warn-title"
   }, "NOT A RECOMMENDED FIT"), computeFitIssues(selectedSize, engineInputs).map((iss, i) => /*#__PURE__*/React.createElement("div", {
     key: i
-  }, "\u2022 ", iss)), computeFitIssues(selectedSize, engineInputs).length === 0 && /*#__PURE__*/React.createElement("div", null, "Outside typical proportional guidelines for this wall.")));
+  }, "• ", iss)), computeFitIssues(selectedSize, engineInputs).length === 0 && /*#__PURE__*/React.createElement("div", null, "Outside typical proportional guidelines for this wall.")));
 
   // display toggles live next to the drawing they affect; PWR/LV also feed
   // the parts list and PDF spec rows, same as they always did
@@ -4699,11 +7612,11 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "SHOW"), /*#__PURE__*/React.createElement("button", {
     className: `chip ${showOutlet ? "on" : ""}`,
     onClick: () => setShowOutlet(!showOutlet),
-    title: "Recessed power outlet \u2014 drawing, parts list, PDF"
+    title: "Recessed power outlet — drawing, parts list, PDF"
   }, "PWR"), /*#__PURE__*/React.createElement("button", {
     className: `chip ${showLowVolt ? "on" : ""}`,
     onClick: () => setShowLowVolt(!showLowVolt),
-    title: "Low-voltage feed \u2014 drawing, parts list, PDF"
+    title: "Low-voltage feed — drawing, parts list, PDF"
   }, "LV"), /*#__PURE__*/React.createElement("button", {
     className: `chip ${showVesa ? "on" : ""}`,
     onClick: () => setShowVesa(!showVesa),
@@ -4711,7 +7624,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "VESA"), /*#__PURE__*/React.createElement("button", {
     className: `chip ${showTvDims ? "on" : ""}`,
     onClick: () => setShowTvDims(!showTvDims),
-    title: "TV width \xD7 height dimension line"
+    title: "TV width × height dimension line"
   }, "TV DIMS"), showBackBox && /*#__PURE__*/React.createElement("button", {
     className: `chip ${showBoxDims ? "on" : ""}`,
     onClick: () => setShowBoxDims(!showBoxDims),
@@ -4763,7 +7676,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "sv"
   }, /*#__PURE__*/React.createElement("em", null, "PWR"), " ", fmt(layout.outlet.aff)), layout.vesa && /*#__PURE__*/React.createElement("span", {
     className: "sv"
-  }, /*#__PURE__*/React.createElement("em", null, "VESA"), " ", layout.vesa.spec.w_mm, "\xD7", layout.vesa.spec.h_mm, " ", layout.vesa.spec.screw), layout.box && /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("em", null, "VESA"), " ", layout.vesa.spec.w_mm, "×", layout.vesa.spec.h_mm, " ", layout.vesa.spec.screw), layout.box && /*#__PURE__*/React.createElement("span", {
     className: "sv"
   }, /*#__PURE__*/React.createElement("em", null, "BOX"), " ", layout.box.label)) : /*#__PURE__*/React.createElement("span", {
     className: "sv dim-sv"
@@ -4786,7 +7699,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }), /*#__PURE__*/React.createElement("button", {
     className: `diag-badge ${allTestsPass && auditClean ? "ok" : "bad"}`,
     onClick: () => setShowDiag(!showDiag),
-    title: "Self-test + render audit \u2014 click for diagnostics"
+    title: "Self-test + render audit — click for diagnostics"
   }, allTestsPass ? "✓" : "✕", " ", selfTest.passed, "/", selfTest.total)));
   const diagPanel = showDiag && /*#__PURE__*/React.createElement("div", {
     className: "diag-panel"
@@ -4804,7 +7717,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "SWEEP"), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: () => {
-      const report = [`TELLAVISION DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`, `Self-tests: ${selfTest.passed}/${selfTest.total} ${allTestsPass ? "PASS" : "FAIL"}`, `Render audit: ${renderAudit.overlaps} overlaps, ${renderAudit.clipped} clipped (${renderAudit.checked} labels)`, sweep ? `Stress sweep: ${sweep.failures.length} failing configs / ${sweep.total}` : `Stress sweep: not run`, ``, ...selfTest.results.map(r => `[${r.group}] ${r.pass ? "PASS" : "FAIL"} — ${r.name}${r.detail && !r.pass ? ` :: ${r.detail}` : ""}`), ...(sweep && sweep.failures.length ? [``, ...sweep.failures.map(f => `[sweep] FAIL — ${f.name}: ${f.overlaps} overlaps, ${f.clipped} clipped :: ${f.pairs.join(" | ")}`)] : []), ``, `State: ${JSON.stringify({
+      const report = [`TELLAVISION DIAGNOSTICS — REV ${revision || "01"} — ${new Date().toISOString()}`, `TellaVision v${APP_VERSION}`, `Self-tests: ${selfTest.passed}/${selfTest.total} ${allTestsPass ? "PASS" : "FAIL"}`, `Render audit: ${renderAudit.overlaps} overlaps, ${renderAudit.clipped} clipped (${renderAudit.checked} labels)`, sweep ? `Stress sweep: ${sweep.failures.length} failing configs / ${sweep.total}` : `Stress sweep: not run`, ``, ...selfTest.results.map(r => `[${r.group}] ${r.pass ? "PASS" : "FAIL"} — ${r.name}${r.detail && !r.pass ? ` :: ${r.detail}` : ""}`), ...(sweep && sweep.failures.length ? [``, ...sweep.failures.map(f => `[sweep] FAIL — ${f.name}: ${f.overlaps} overlaps, ${f.clipped} clipped :: ${f.pairs.join(" | ")}`)] : []), ``, `State: ${JSON.stringify({
         wallW,
         wallH,
         hasFireplace,
@@ -4835,7 +7748,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "diag-row head-row"
   }, /*#__PURE__*/React.createElement("span", null, "Render audit"), /*#__PURE__*/React.createElement("span", {
     className: auditClean ? "p" : "f"
-  }, renderAudit.overlaps, " overlaps \xB7 ", renderAudit.clipped, " clipped \xB7 ", renderAudit.checked, " labels")), sweep && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, renderAudit.overlaps, " overlaps · ", renderAudit.clipped, " clipped · ", renderAudit.checked, " labels")), sweep && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "diag-row head-row"
   }, /*#__PURE__*/React.createElement("span", null, "Stress sweep"), /*#__PURE__*/React.createElement("span", {
     className: sweep.failures.length === 0 ? "p" : "f"
@@ -4870,7 +7783,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "download",
     size: 11
-  }), " EXPORT \u25BE"), showExport && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }), " EXPORT ▾"), showExport && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "menu-backdrop",
     onClick: () => setShowExport(false)
   }), /*#__PURE__*/React.createElement("div", {
@@ -4881,7 +7794,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       setShowExport(false);
       exportPack();
     }
-  }, "\u2605 FULL PACK", /*#__PURE__*/React.createElement("span", {
+  }, "★ FULL PACK", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
   }, "PDF + JSON + DXF in one shot")), /*#__PURE__*/React.createElement("div", {
     className: "menu-sep"
@@ -4893,7 +7806,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, "PDF", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
-  }, "submittal sheet \u2014 specs + parts")), /*#__PURE__*/React.createElement("button", {
+  }, "submittal sheet — specs + parts")), /*#__PURE__*/React.createElement("button", {
     className: "menu-item",
     onClick: () => {
       setShowExport(false);
@@ -4909,7 +7822,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, "DXF", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
-  }, "Visio / AutoCAD / Bluebeam \u2014 true scale, layered")), /*#__PURE__*/React.createElement("div", {
+  }, "Visio / AutoCAD / Bluebeam — true scale, layered")), /*#__PURE__*/React.createElement("div", {
     className: "menu-sep"
   }), /*#__PURE__*/React.createElement("button", {
     className: "menu-item",
@@ -4927,11 +7840,57 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, "SVG", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
-  }, "blueline vector image"))))), /*#__PURE__*/React.createElement("button", {
+  }, "blueline vector image"))))));
+
+  // The way IN. Two labelled choices rather than one guess-the-type button:
+  // a reference drawing is a backdrop you trace, a data file rewrites your
+  // fields — different enough that the user should pick knowingly.
+  const startBtns = /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "menu-wrap"
+  }, /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
-    onClick: () => fileRef.current && fileRef.current.click(),
-    title: "Import a design or pull TV fields from another app's JSON"
-  }, "IMPORT"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowImport(!showImport),
+    title: "Bring in a drawing to trace, or data from another app"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "doc",
+    size: 11
+  }), " IMPORT ▾"), showImport && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "menu-backdrop",
+    onClick: () => setShowImport(false)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "menu"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "menu-item",
+    onClick: () => {
+      setShowImport(false);
+      underlayFileRef.current && underlayFileRef.current.click();
+    }
+  }, "REFERENCE DRAWING", /*#__PURE__*/React.createElement("span", {
+    className: "menu-sub"
+  }, "PDF or image — trace and scale over it")), /*#__PURE__*/React.createElement("button", {
+    className: "menu-item",
+    onClick: () => {
+      setShowImport(false);
+      fileRef.current && fileRef.current.click();
+    }
+  }, "DESIGN / SURVEY DATA", /*#__PURE__*/React.createElement("span", {
+    className: "menu-sub"
+  }, "JSON from TellaVision or another Field Kit app")), /*#__PURE__*/React.createElement("div", {
+    className: "menu-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "menu-note"
+  }, "…or drag a file straight onto the drawing")))), /*#__PURE__*/React.createElement("button", {
+    className: `btn ghost ${overlayCount() > 0 ? "flagged" : ""}`,
+    onClick: () => setShowData(true),
+    title: "Edit the product and measurement tables this app calculates from"
+  }, "DATA", overlayCount() > 0 ? ` (${overlayCount()})` : ""), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
     onClick: resetAll,
     title: "Clear saved design"
@@ -4948,6 +7907,33 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       e.target.value = "";
     }
   }));
+
+  // Shown only on a genuinely empty app — you use this daily, so it gets out of
+  // the way the moment there is a drawing or a size.
+  const startPanel = !startHidden && !selectedSize && !underlay && /*#__PURE__*/React.createElement("div", {
+    className: "startp"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "rec-tag"
+  }, "START A LAYOUT"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      marginBottom: 2
+    }
+  }, "How do you want to begin?"), /*#__PURE__*/React.createElement("div", {
+    className: "hint"
+  }, "Bring in what you already have, or just start typing wall dimensions.")), /*#__PURE__*/React.createElement("div", {
+    className: "startp-row"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "startc",
+    onClick: () => underlayFileRef.current && underlayFileRef.current.click()
+  }, /*#__PURE__*/React.createElement("strong", null, "Reference drawing"), /*#__PURE__*/React.createElement("span", null, "Import the architect's elevation as a PDF or photo, scale it, and lay the TV over it.")), /*#__PURE__*/React.createElement("button", {
+    className: "startc",
+    onClick: () => fileRef.current && fileRef.current.click()
+  }, /*#__PURE__*/React.createElement("strong", null, "Design or survey data"), /*#__PURE__*/React.createElement("span", null, "Pull wall, brand and size straight from a SiteWalk / survey JSON, or reopen a saved design.")), /*#__PURE__*/React.createElement("button", {
+    className: "startc",
+    onClick: () => setStartHidden(true)
+  }, /*#__PURE__*/React.createElement("strong", null, "Start blank"), /*#__PURE__*/React.createElement("span", null, "Set the wall by hand and pick a TV. Everything else follows from there."))));
   const importBanner = importSummary && /*#__PURE__*/React.createElement("div", {
     className: "import-note"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4971,13 +7957,459 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       opacity: 0.85,
       marginTop: 2
     }
-  }, "\u2022 ", n))), /*#__PURE__*/React.createElement("button", {
+  }, "• ", n))), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: () => setImportSummary(null)
   }, "DISMISS"));
+
+  // ----- markup toolbar (sits directly over the drawing) -----
+  const TOOL_LABEL = {
+    move: "MOVE",
+    select: "SELECT",
+    mask: "BLANK",
+    pen: "PEN",
+    line: "LINE",
+    arrow: "ARROW",
+    rect: "BOX",
+    text: "TEXT",
+    measure: "MEASURE"
+  };
+  const pickTool = t => {
+    calibPtsRef.current = [];
+    draftRef.current = null;
+    editRef.current = null;
+    setSel([]);
+    setLasso(null);
+    setCropping(false);
+    setCalib(null);
+    setDraft(null);
+    setTool(cur => cur === t ? "off" : t);
+  };
+  const startCalib = mode => {
+    if (!underlay) return;
+    if (mode === "box" && !selectedSize) {
+      setUnderlayNote("Pick a TV size first — snap scales from the panel width");
+      return;
+    }
+    setTool("off");
+    setDraft(null);
+    calibPtsRef.current = [];
+    setCalib({
+      mode,
+      pts: []
+    });
+    setUnderlayNote(mode === "two" ? "Click both ends of a dimension you know, then type its real length" : "Drag a box across the TV shown on the drawing");
+  };
+  const markupBar = /*#__PURE__*/React.createElement("div", {
+    className: "mk-bar"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `chip ${tool === "off" && !calib ? "on" : ""}`,
+    onClick: () => {
+      setTool("off");
+      setCalib(null);
+      calibPtsRef.current = [];
+    },
+    title: "Stop drawing — restores normal scrolling"
+  }, "OFF"), MARKUP_TOOLS.filter(t => t !== "mask" || underlay).map(t => /*#__PURE__*/React.createElement("button", {
+    key: t,
+    className: `chip ${tool === t ? "on" : ""}`,
+    onClick: () => pickTool(t),
+    title: t === "mask" ? "Paint over part of the reference drawing so the schematic reads clearly" : undefined
+  }, TOOL_LABEL[t])), /*#__PURE__*/React.createElement("span", {
+    className: "mk-sep"
+  }), MARKUP_COLORS.map(c => /*#__PURE__*/React.createElement("button", {
+    key: c,
+    className: `mk-sw ${(solo ? solo.color : mkColor) === c ? "on" : ""}`,
+    style: {
+      background: c
+    },
+    onClick: () => {
+      setMkColor(c);
+      if (sel.length) patchSel(m => ({
+        ...m,
+        color: c
+      }));
+    },
+    title: sel >= 0 ? "Recolour the selected item" : c,
+    "aria-label": `colour ${c}`
+  })), MARKUP_WIDTHS.map(w => /*#__PURE__*/React.createElement("button", {
+    key: w,
+    className: `chip ${(solo ? solo.w : mkWidth) === w ? "on" : ""}`,
+    onClick: () => {
+      setMkWidth(w);
+      if (sel.length) patchSel(m => ({
+        ...m,
+        w
+      }));
+    }
+  }, w === 1 ? "THIN" : w === 2 ? "MED" : "BOLD")), /*#__PURE__*/React.createElement("span", {
+    className: "mk-sep"
+  }), sel.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "chip on",
+    onClick: deleteSel,
+    title: "Delete the selection (or press Delete)"
+  }, "DELETE ", sel.length > 1 ? `(${sel.length})` : ""), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: undoMarkup,
+    disabled: !markup.length
+  }, "UNDO"), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: () => {
+      setMarkup([]);
+      setSel([]);
+    },
+    disabled: !markup.length
+  }, "CLEAR"), /*#__PURE__*/React.createElement("span", {
+    className: "mk-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${snapOn ? "on" : ""}`,
+    onClick: () => setSnapOn(v => !v),
+    title: "Snap to wall, floor, TV edges, centreline and box edges — hold Alt to override"
+  }, snapOn ? "☑" : "☐", " SNAP"), underlay && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "mk-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${cropping ? "on" : ""}`,
+    onClick: () => {
+      setCropping(c => !c);
+      setTool("off");
+      setCalib(null);
+    },
+    title: "Drag a box to show only that part of the sheet"
+  }, "CROP"), underlay.crop && /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: () => setUnderlay(u => u && {
+      ...u,
+      crop: null
+    })
+  }, "UNCROP"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${trace ? "on" : ""}`,
+    onClick: () => setTrace(t => !t),
+    title: "Dark ink on white and hollow shapes, so the drawing shows through"
+  }, "TRACE"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${tool === "move" ? "on" : ""}`,
+    onClick: () => pickTool("move"),
+    title: "Drag the imported drawing into position"
+  }, "MOVE PDF"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${calib?.mode === "two" ? "on" : ""}`,
+    onClick: () => startCalib("two"),
+    title: "Click a known dimension, type its true length"
+  }, "2-PT SCALE"), /*#__PURE__*/React.createElement("button", {
+    className: `chip ${calib?.mode === "box" ? "on" : ""}`,
+    onClick: () => startCalib("box"),
+    title: "Box the TV on the drawing — scales and positions in one move"
+  }, "SNAP TO TV")));
+
+  // ----- inline prompts (window.prompt is unreliable in installed PWAs) -----
+  const askDialog = (calibAsk || textAsk) && /*#__PURE__*/React.createElement("div", {
+    className: "ask-wrap",
+    onClick: () => {
+      setCalibAsk(null);
+      setTextAsk(null);
+      setCalib(null);
+      calibPtsRef.current = [];
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ask",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rec-tag"
+  }, calibAsk ? "TRUE LENGTH OF THAT SPAN" : "ANNOTATION TEXT"), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    autoFocus: true,
+    type: "text",
+    value: askValue,
+    placeholder: calibAsk ? `e.g. 96, 8' or 8' 6 1/2"` : "e.g. VERIFY IN FIELD",
+    onChange: e => setAskValue(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") {
+        if (calibAsk) applyTwoPoint();else {
+          const v = askValue.trim();
+          if (v) setMarkup(m => [...m, {
+            id: `t${m.length}`,
+            type: "text",
+            color: mkColor,
+            w: mkWidth,
+            pts: [textAsk.pt],
+            text: v
+          }]);
+          setTextAsk(null);
+          setAskValue("");
+        }
+      } else if (e.key === "Escape") {
+        setCalibAsk(null);
+        setTextAsk(null);
+        setCalib(null);
+        calibPtsRef.current = [];
+      }
+    }
+  }), calibAsk && /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 6
+    }
+  }, "Feet and inches both work — 96 · 8' · 8' 6 1/2\""), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 12,
+      justifyContent: "flex-end"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: () => {
+      setCalibAsk(null);
+      setTextAsk(null);
+      setCalib(null);
+      calibPtsRef.current = [];
+      setAskValue("");
+    }
+  }, "CANCEL"), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    onClick: () => {
+      if (calibAsk) applyTwoPoint();else {
+        const v = askValue.trim();
+        if (v) setMarkup(m => [...m, {
+          id: `t${m.length}`,
+          type: "text",
+          color: mkColor,
+          w: mkWidth,
+          pts: [textAsk.pt],
+          text: v
+        }]);
+        setTextAsk(null);
+        setAskValue("");
+      }
+    }
+  }, "APPLY"))));
+
+  // live overlay: the stroke under the user's finger and the calibration pick
+  const frame = {
+    wallX: screenSchem.wallX,
+    floorY: screenSchem.floorY,
+    scale: screenSchem.scale,
+    fmt
+  };
+  const calibOverlay = calib && (() => {
+    const els = [];
+    const pts = calib.pts || [];
+    if (calib.mode === "box" && pts.length === 2) {
+      const a = toPx(pts[0]),
+        b = toPx(pts[1]);
+      els.push(/*#__PURE__*/React.createElement("rect", {
+        key: "cb",
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y),
+        fill: "rgba(74,158,255,0.12)",
+        stroke: "#4A9EFF",
+        strokeWidth: "1.5",
+        strokeDasharray: "5 3"
+      }));
+      els.push(/*#__PURE__*/React.createElement("text", {
+        key: "cbt",
+        x: (a.x + b.x) / 2,
+        y: Math.min(a.y, b.y) - 7,
+        textAnchor: "middle",
+        fill: "#4A9EFF",
+        fontSize: "11",
+        fontWeight: "600",
+        fontFamily: "'IBM Plex Mono', monospace"
+      }, selectedSize ? `${selectedSize}" PANEL` : "PICK A TV SIZE FIRST"));
+    }
+    if (calib.mode === "two") {
+      const live = pts.length === 1 && calib.hover ? [pts[0], calib.hover] : pts;
+      live.forEach((q, i) => {
+        const c = toPx(q);
+        els.push(/*#__PURE__*/React.createElement("circle", {
+          key: `cp${i}`,
+          cx: c.x,
+          cy: c.y,
+          r: "5",
+          fill: "none",
+          stroke: "#4A9EFF",
+          strokeWidth: "2"
+        }));
+        els.push(/*#__PURE__*/React.createElement("line", {
+          key: `cx${i}`,
+          x1: c.x - 9,
+          y1: c.y,
+          x2: c.x + 9,
+          y2: c.y,
+          stroke: "#4A9EFF",
+          strokeWidth: "1"
+        }));
+        els.push(/*#__PURE__*/React.createElement("line", {
+          key: `cy${i}`,
+          x1: c.x,
+          y1: c.y - 9,
+          x2: c.x,
+          y2: c.y + 9,
+          stroke: "#4A9EFF",
+          strokeWidth: "1"
+        }));
+      });
+      if (live.length === 2) {
+        const a = toPx(live[0]),
+          b = toPx(live[1]);
+        els.push(/*#__PURE__*/React.createElement("line", {
+          key: "cl",
+          x1: a.x,
+          y1: a.y,
+          x2: b.x,
+          y2: b.y,
+          stroke: "#4A9EFF",
+          strokeWidth: "1.5",
+          strokeDasharray: "5 3"
+        }));
+      }
+    }
+    return els;
+  })();
+  const selOverlay = (() => {
+    const els = [];
+    const P0 = pt => toPx(pt);
+    // every selected item gets a halo; grab handles only when exactly one is picked
+    sel.forEach((idx, n) => {
+      const m = markup[idx];
+      if (!m || !m.pts || !m.pts.length) return;
+      if (m.type === "rect" || m.type === "mask") {
+        const c = rectCorners(m.pts[0], m.pts[m.pts.length - 1]).map(P0);
+        els.push(/*#__PURE__*/React.createElement("polygon", {
+          key: `h${n}`,
+          points: c.map(p => `${p.x},${p.y}`).join(" "),
+          fill: "none",
+          stroke: "#3ECFE0",
+          strokeWidth: "1.5",
+          strokeDasharray: "5 3"
+        }));
+      } else if (m.type === "text") {
+        const p = P0(m.pts[0]);
+        els.push(/*#__PURE__*/React.createElement("circle", {
+          key: `h${n}`,
+          cx: p.x,
+          cy: p.y,
+          r: "11",
+          fill: "none",
+          stroke: "#3ECFE0",
+          strokeWidth: "1.5",
+          strokeDasharray: "5 3"
+        }));
+      } else {
+        els.push(/*#__PURE__*/React.createElement("polyline", {
+          key: `h${n}`,
+          points: m.pts.map(P0).map(p => `${p.x},${p.y}`).join(" "),
+          fill: "none",
+          stroke: "#3ECFE0",
+          strokeWidth: (m.w || 2) + 5,
+          strokeOpacity: "0.28",
+          strokeLinecap: "round",
+          strokeLinejoin: "round"
+        }));
+      }
+    });
+    if (solo) {
+      handlesFor(solo).forEach((h, i) => {
+        const p = P0(h);
+        els.push(/*#__PURE__*/React.createElement("rect", {
+          key: `g${i}`,
+          x: p.x - 5,
+          y: p.y - 5,
+          width: "10",
+          height: "10",
+          rx: "2",
+          fill: "#0D1B2A",
+          stroke: "#3ECFE0",
+          strokeWidth: "2"
+        }));
+      });
+    }
+    // rubber-band: selection lasso, or the crop window being dragged
+    if (lasso) {
+      const a = P0(lasso.a),
+        b = P0(lasso.b);
+      els.push(/*#__PURE__*/React.createElement("rect", {
+        key: "lasso",
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y),
+        fill: cropping ? "rgba(255,209,102,0.10)" : "rgba(62,207,224,0.10)",
+        stroke: cropping ? "#FFD166" : "#3ECFE0",
+        strokeWidth: "1.5",
+        strokeDasharray: "6 4"
+      }));
+      if (cropping) {
+        els.push(/*#__PURE__*/React.createElement("text", {
+          key: "lassot",
+          x: (a.x + b.x) / 2,
+          y: Math.min(a.y, b.y) - 7,
+          textAnchor: "middle",
+          fill: "#FFD166",
+          fontSize: "11",
+          fontWeight: "600",
+          fontFamily: "'IBM Plex Mono', monospace"
+        }, "CROP SHEET"));
+      }
+    }
+    // why it jumped: a guide through whatever anchor the snap grabbed
+    if (snapHit) {
+      const g = {
+        stroke: "#FFD166",
+        strokeWidth: 1,
+        strokeDasharray: "4 4",
+        opacity: 0.9
+      };
+      if (snapHit.x) {
+        const px = toPx({
+          x: snapHit.x.v,
+          y: 0
+        }).x;
+        els.push(/*#__PURE__*/React.createElement("line", {
+          key: "sgx",
+          x1: px,
+          y1: screenSchem.wallY - 10,
+          x2: px,
+          y2: screenSchem.floorY + 10,
+          ...g
+        }));
+        els.push(/*#__PURE__*/React.createElement("text", {
+          key: "sgxt",
+          x: px + 4,
+          y: screenSchem.wallY - 14,
+          fill: "#FFD166",
+          fontSize: "9",
+          fontFamily: "'IBM Plex Mono', monospace"
+        }, snapHit.x.why.toUpperCase()));
+      }
+      if (snapHit.y) {
+        const py = toPx({
+          x: 0,
+          y: snapHit.y.v
+        }).y;
+        els.push(/*#__PURE__*/React.createElement("line", {
+          key: "sgy",
+          x1: screenSchem.wallX - 10,
+          y1: py,
+          x2: screenSchem.wallX + wallW * screenSchem.scale + 10,
+          y2: py,
+          ...g
+        }));
+        els.push(/*#__PURE__*/React.createElement("text", {
+          key: "sgyt",
+          x: screenSchem.wallX + 4,
+          y: py - 4,
+          fill: "#FFD166",
+          fontSize: "9",
+          fontFamily: "'IBM Plex Mono', monospace"
+        }, snapHit.y.why.toUpperCase()));
+      }
+    }
+    return els.length ? els : null;
+  })();
   const canvas = /*#__PURE__*/React.createElement("div", {
     className: "canvas-panel"
-  }, /*#__PURE__*/React.createElement("svg", {
+  }, markupBar, /*#__PURE__*/React.createElement("svg", {
     ref: svgRef,
     width: screenSchem.svgW,
     height: screenSchem.svgH,
@@ -4987,8 +8419,14 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       display: "block",
       maxWidth: "100%",
       height: "auto",
-      margin: "0 auto"
+      margin: "0 auto",
+      touchAction: interactive ? "none" : "auto",
+      cursor: calib ? "crosshair" : tool === "move" ? "grab" : cropping ? "crosshair" : tool === "select" ? sel.length ? "move" : "default" : tool !== "off" ? "crosshair" : "default"
     },
+    onPointerDown: onPtrDown,
+    onPointerMove: onPtrMove,
+    onPointerUp: onPtrUp,
+    onPointerCancel: onPtrUp,
     preserveAspectRatio: "xMidYMid meet"
   }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("pattern", {
     id: "grid-scr",
@@ -4998,12 +8436,12 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, /*#__PURE__*/React.createElement("path", {
     d: "M 20 0 L 0 0 0 20",
     fill: "none",
-    stroke: SCREEN_PALETTE.grid,
+    stroke: screenSchem.P.grid,
     strokeWidth: "0.5"
   }))), /*#__PURE__*/React.createElement("rect", {
     width: "100%",
     height: "100%",
-    fill: SCREEN_PALETTE.canvas
+    fill: screenSchem.P.canvas
   }), /*#__PURE__*/React.createElement("rect", {
     width: "100%",
     height: "100%",
@@ -5013,17 +8451,20 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     y: 18,
     textAnchor: "end",
     fontSize: "9",
-    fill: SCREEN_PALETTE.title,
+    fill: screenSchem.P.title,
     fontFamily: "'IBM Plex Mono', monospace",
     letterSpacing: "2"
   }, "FRONT ELEVATION"), /*#__PURE__*/React.createElement("text", {
     x: 16,
     y: 18,
     fontSize: "9",
-    fill: SCREEN_PALETTE.title,
+    fill: screenSchem.P.title,
     fontFamily: "'IBM Plex Mono', monospace",
     letterSpacing: "2"
-  }, selectedSize ? `${brand.toUpperCase()} ${selectedSize}"` : "SELECT TV SIZE"), screenSchem.elements));
+  }, selectedSize ? `${brand.toUpperCase()} ${selectedSize}"` : "SELECT TV SIZE"), screenSchem.elements, draft && renderMarkupEls([draft], {
+    ...frame,
+    keyPrefix: "draft"
+  }), selOverlay, calibOverlay));
 
   // hidden blueline render — what exports serialize
   const printSvg = /*#__PURE__*/React.createElement("div", {
@@ -5135,7 +8576,70 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .size-num { font-family: var(--fd); font-size: 20px; font-weight: 700; line-height: 1; }
         .size-sub { font-family: var(--fm); font-size: 7px; letter-spacing: 1.5px; margin-top: 4px; color: var(--txt3); }
         .chip { padding: 4px 10px; border: 1px solid var(--line2); background: transparent; color: var(--txt2); font-family: var(--fm); font-size: 9px; letter-spacing: 1px; cursor: pointer; border-radius: 3px; transition: all .15s; }
-        .chip.on, .chip:hover { border-color: var(--acc); color: var(--acc); }
+        .chip.on, .chip:hover:not(:disabled) { border-color: var(--acc); color: var(--acc); }
+        .chip:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        /* markup toolbar — sits directly over the drawing so tools are a thumb away */
+        .mk-bar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 0 0 9px; margin-bottom: 9px; border-bottom: 1px solid var(--line); }
+        .mk-bar .chip { min-height: 30px; }
+        .mk-sep { width: 1px; align-self: stretch; background: var(--line2); margin: 2px 4px; }
+        .mk-sw { width: 22px; height: 22px; border-radius: 3px; border: 2px solid var(--line2); cursor: pointer; padding: 0; }
+        .mk-sw.on { border-color: var(--acc); box-shadow: 0 0 0 2px var(--ink2), 0 0 0 3px var(--acc); }
+        /* ---- narrative flow: stage headings, start panel, drop target ---- */
+        .stage { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+                 margin: 20px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+        .stage:first-child { margin-top: 2px; }
+        .stage-name { font-family: var(--fm); font-size: 9px; letter-spacing: 2.5px; font-weight: 700; color: var(--acc); }
+        .stage-note { font-size: 9.5px; color: var(--txt2); opacity: 0.75; }
+        .menu-note { padding: 8px 12px; font-size: 9.5px; color: var(--txt2); opacity: 0.8; }
+        .startp { border: 1px solid var(--line2); border-radius: 6px; padding: 14px; margin-bottom: 12px; background: var(--ink2); }
+        .startp-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 12px; }
+        .startc { text-align: left; padding: 11px 12px; border: 1px solid var(--line2); border-radius: 5px;
+                  background: transparent; cursor: pointer; transition: all .15s; display: block; }
+        .startc:hover { border-color: var(--acc); background: rgba(62,207,224,0.05); }
+        .startc strong { display: block; color: var(--txt); font-size: 12px; margin-bottom: 3px; }
+        .startc span { display: block; color: var(--txt2); font-size: 10px; line-height: 1.45; }
+        .main-col.dropping { outline: 2px dashed var(--acc); outline-offset: -6px; border-radius: 6px; }
+
+        /* ---- catalog data screen ---- */
+        .btn.ghost.flagged { border-color: var(--amber); color: var(--amber); }
+        .dwrap { position: fixed; inset: 0; z-index: 1000; background: var(--ink); display: flex; flex-direction: column; }
+        .dhead { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+                 padding: 14px 18px; border-bottom: 1px solid var(--line); }
+        .dbody { flex: 1; min-height: 0; display: grid; grid-template-columns: 190px 1fr; }
+        .dnav { border-right: 1px solid var(--line); padding: 10px; overflow-y: auto; }
+        .dnav-item { display: flex; justify-content: space-between; align-items: center; gap: 6px; width: 100%; text-align: left;
+                     padding: 9px 10px; margin-bottom: 3px; background: transparent; border: 1px solid transparent;
+                     color: var(--txt2); font-family: var(--fm); font-size: 10px; letter-spacing: 1px; cursor: pointer; border-radius: 4px; }
+        .dnav-item:hover { color: var(--txt); }
+        .dnav-item.on { background: var(--ink2); border-color: var(--acc); color: var(--acc); }
+        .dmain { padding: 14px 18px; overflow: auto; min-width: 0; display: flex; flex-direction: column; }
+        .dscroll { overflow: auto; flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: 6px; }
+        .dgrid { border-collapse: collapse; width: 100%; font-family: var(--fm); font-size: 11px; }
+        .dgrid th { position: sticky; top: 0; z-index: 1; background: var(--ink2); text-align: left; padding: 8px 8px;
+                    font-size: 9px; letter-spacing: 1px; color: var(--txt2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+        .dgrid td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+        .dgrid tr.rowbad td { background: rgba(255,92,77,0.07); }
+        .dunit { opacity: 0.55; text-transform: none; letter-spacing: 0; }
+        .dkey { color: var(--txt); font-weight: 600; white-space: nowrap; }
+        .dcell { width: 92px; padding: 5px 6px; background: var(--ink); border: 1px solid var(--line2); border-radius: 3px;
+                 color: var(--txt); font-family: var(--fm); font-size: 11px; }
+        .dcell.wide { width: 100%; min-width: 260px; }
+        .dcell:focus { border-color: var(--acc); outline: none; }
+        .dcell.bad { border-color: var(--warn); color: var(--warn); }
+        .derr { color: var(--warn); font-size: 9.5px; margin-top: 3px; }
+        .dact { white-space: nowrap; display: flex; gap: 4px; }
+        .dtag { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 3px; font-size: 8px; letter-spacing: 1px; font-weight: 700; }
+        .dtag.edited { background: var(--amber); color: var(--ink); }
+        .dtag.added { background: var(--acc); color: var(--ink); }
+        .dtag.bad { background: var(--warn); color: #fff; }
+        @media (max-width: 760px) {
+          .dbody { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+          .dnav { display: flex; gap: 6px; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); }
+          .dnav-item { width: auto; white-space: nowrap; }
+        }
+        .ask-wrap { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 900; padding: 20px; }
+        .ask { background: var(--ink2); border: 1px solid var(--acc); border-radius: 6px; padding: 16px; width: min(340px, 100%); }
         .canvas-panel { background: var(--ink2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .import-note { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; background: rgba(62,207,224,0.07); border: 1px solid rgba(62,207,224,0.4); border-radius: 5px; font-family: var(--fm); color: #B8E8EF; line-height: 1.5; }
         .menu-wrap { position: relative; }
@@ -5188,9 +8692,16 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         ::-webkit-scrollbar-track { background: transparent; }
       `), /*#__PURE__*/React.createElement("header", {
     className: "hdr"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", null, "TELL\xB7A\xB7VISION"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 18,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", null, "TELL·A·VISION"), /*#__PURE__*/React.createElement("div", {
     className: "sub"
-  }, "BLUEPRINT EDITION \xB7 REV ", revision || "01", " \xB7 FRONT ELEVATION")), /*#__PURE__*/React.createElement("div", {
+  }, "BLUEPRINT EDITION · v", APP_VERSION, " · REV ", revision || "01", " · FRONT ELEVATION")), !isMobile && startBtns), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -5232,20 +8743,34 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, /*#__PURE__*/React.createElement("rect", {
     width: "100%",
     height: "100%",
-    fill: SCREEN_PALETTE.canvas
+    fill: screenSchem.P.canvas
   }), screenSchem.elements), /*#__PURE__*/React.createElement("div", {
     className: "mini-tag"
-  }, "LIVE PREVIEW \u2014 TAP FOR FULL DRAWING")), setupPanel), /*#__PURE__*/React.createElement("main", {
-    className: "main-col",
+  }, "LIVE PREVIEW — TAP FOR FULL DRAWING")), setupPanel), /*#__PURE__*/React.createElement("main", {
+    className: `main-col ${dragOver ? "dropping" : ""}`,
     style: {
       display: isMobile && activePanel !== "drawing" ? "none" : "flex"
+    },
+    onDragOver: e => {
+      e.preventDefault();
+      if (!dragOver) setDragOver(true);
+    },
+    onDragLeave: e => {
+      if (e.currentTarget === e.target) setDragOver(false);
+    },
+    onDrop: e => {
+      e.preventDefault();
+      setDragOver(false);
+      routeFiles(e.dataTransfer && e.dataTransfer.files);
     }
-  }, importBanner, sizeStrip, toggleStrip, legendPanel, canvas, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
+  }, importBanner, startPanel, sizeStrip, toggleStrip, legendPanel, canvas, askDialog, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "center"
+      justifyContent: "center",
+      gap: 8,
+      flexWrap: "wrap"
     }
-  }, exportBtns)), isMobile && activePanel === "specs" && /*#__PURE__*/React.createElement("div", {
+  }, startBtns, exportBtns)), isMobile && activePanel === "specs" && /*#__PURE__*/React.createElement("div", {
     className: "main-col"
   }, /*#__PURE__*/React.createElement("div", {
     className: "sec-title",
@@ -5281,7 +8806,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "stat"
   }, /*#__PURE__*/React.createElement("span", null, "LV AFF"), /*#__PURE__*/React.createElement("strong", null, fmt(layout.lv.aff))), layout.vesa && /*#__PURE__*/React.createElement("div", {
     className: "stat"
-  }, /*#__PURE__*/React.createElement("span", null, "VESA"), /*#__PURE__*/React.createElement("strong", null, layout.vesa.spec.w_mm, "\xD7", layout.vesa.spec.h_mm, " ", layout.vesa.spec.screw)), layout.box && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "VESA"), /*#__PURE__*/React.createElement("strong", null, layout.vesa.spec.w_mm, "×", layout.vesa.spec.h_mm, " ", layout.vesa.spec.screw)), layout.box && /*#__PURE__*/React.createElement("div", {
     className: "stat"
   }, /*#__PURE__*/React.createElement("span", null, "Back box"), /*#__PURE__*/React.createElement("strong", null, layout.box.label))) : /*#__PURE__*/React.createElement("div", {
     className: "hint"
@@ -5301,7 +8826,10 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }).map((r, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     className: "stat"
-  }, /*#__PURE__*/React.createElement("span", null, r[0]), /*#__PURE__*/React.createElement("strong", null, r[1]))))))), printSvg, diagPanel);
+  }, /*#__PURE__*/React.createElement("span", null, r[0]), /*#__PURE__*/React.createElement("strong", null, r[1]))))))), showData && /*#__PURE__*/React.createElement(DataScreen, {
+    onClose: () => setShowData(false),
+    onChange: () => setCatalogRev(r => r + 1)
+  }), printSvg, diagPanel);
 }
 window.App = App;
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(window.App));

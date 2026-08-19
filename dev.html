@@ -43,7 +43,9 @@
 
       const out = Babel.transform(patched, {
         presets: [
-          ['typescript', { allExtensions: true, isTSX: true }],
+          // newer @babel/standalone dropped allExtensions/isTSX — it now infers
+          // JSX from the .tsx filename passed below
+          'typescript',
           ['react', { runtime: 'classic' }],
         ],
         filename: 'tellavision.tsx',

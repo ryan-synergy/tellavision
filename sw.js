@@ -1,10 +1,12 @@
-const CACHE = "tellavision-v1";
+const CACHE = "tellavision-v2-0-0";
 const CORE = [
   "./",
   "./index.html",
   "https://unpkg.com/react@18.3.1/umd/react.production.min.js",
   "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
 ];
+// Fetched on first PDF import and cached by the runtime handler below, so the
+// reference-drawing importer keeps working offline after one online use.
 
 self.addEventListener("install", e => {
   self.skipWaiting();
