@@ -67,6 +67,29 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - EXPORT → PDF contains the underlay `<image>` and the markup strokes; the DXF
   contains a `MARKUP` layer.
 
+## Chrome budget — options hide, tools stay
+
+Measured on a tablet (768x1024) before v2.2.0: 443px of chrome sat above the
+drawing and the canvas got 432px. More chrome than drawing. The drawing itself
+was clean (0 overlaps in the densest case buildable), so density was always a
+controls problem, not a layout one.
+
+- **The gear (⚙, header) holds set-once options**: the six annotation toggles
+  (PWR, LV, VESA, TV DIMS, BOX DIMS, TAPE-OUT), FULL WORDS, LEGEND, units and
+  SNAP. The permanent SHOW strip is gone. If you add a display option, it goes
+  here, not into a strip.
+- **The six reference-drawing controls collapsed into one `PDF ▾` menu** —
+  SNAP TO TV, 2-POINT SCALE, MOVE, CROP, UNCROP, TRACE. They were already
+  duplicated in the sidebar's Reference Drawing section; the toolbar now carries
+  one button instead of six.
+- **Colour and weight are inline on desktop, collapsed into one style button on
+  tablet/mobile** (`!isMobile && !isTablet`). A tablet's main column is only
+  ~460px with the sidebar; inline swatches forced a third row.
+- Result: tablet chrome 443 -> 359px, markup bar 3 rows -> 2, desktop unchanged
+  at one 40px row.
+- Units moved out of the status bar into Settings. The status bar is now just
+  computed values plus the health badge.
+
 ## Information architecture — the app reads start-to-finish
 
 The header is ordered as the job runs: name, then `IMPORT ▾` / `DATA` / `RESET`

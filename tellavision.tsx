@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -2974,6 +2974,9 @@ export default function App() {
   const [trace, setTrace] = useState(SAVED.trace !== false);  // ink tuned for tracing over a scan
   const [showData, setShowData] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showPdfMenu, setShowPdfMenu] = useState(false);
+  const [showStyle, setShowStyle] = useState(false);
   const [startHidden, setStartHidden] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [catalogRev, setCatalogRev] = useState(0);   // bumped when the catalog is edited
@@ -4044,18 +4047,68 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 
   // display toggles live next to the drawing they affect; PWR/LV also feed
   // the parts list and PDF spec rows, same as they always did
-  const toggleStrip = (
-    <div className="toggle-strip">
-      <span className="strip-title">SHOW</span>
-      <button className={`chip ${showOutlet ? "on" : ""}`} onClick={() => setShowOutlet(!showOutlet)} title="Recessed power outlet — drawing, parts list, PDF">PWR</button>
-      <button className={`chip ${showLowVolt ? "on" : ""}`} onClick={() => setShowLowVolt(!showLowVolt)} title="Low-voltage feed — drawing, parts list, PDF">LV</button>
-      <button className={`chip ${showVesa ? "on" : ""}`} onClick={() => setShowVesa(!showVesa)} title="VESA pattern on the drawing">VESA</button>
-      <button className={`chip ${showTvDims ? "on" : ""}`} onClick={() => setShowTvDims(!showTvDims)} title="TV width × height dimension line">TV DIMS</button>
-      {showBackBox && <button className={`chip ${showBoxDims ? "on" : ""}`} onClick={() => setShowBoxDims(!showBoxDims)} title="Back-box rough-in dims (bottom edge)">BOX DIMS</button>}
-      <button className={`chip ${showTapeOut ? "on" : ""}`} onClick={() => setShowTapeOut(!showTapeOut)} title="Tape lines to mark the TV on the real wall">TAPE-OUT</button>
-      <span className="strip-sep"/>
-      <button className={`chip ${fullWords ? "on" : ""}`} onClick={() => setFullWords(!fullWords)} title="Spell out abbreviations on the drawing and PDF">FULL WORDS</button>
-      <button className={`chip ${showLegend ? "on" : ""}`} onClick={() => setShowLegend(!showLegend)} title="What the abbreviations mean">LEGEND</button>
+  // Set-once options live behind the gear rather than in a permanent strip.
+  // On a tablet the SHOW strip plus a 3-row markup bar ate more vertical space
+  // than the drawing itself; these are things you set per job and forget.
+  const SettingsRow = ({ label, hint, children }) => (
+    <div className="set-row">
+      <div>
+        <div className="set-label">{label}</div>
+        {hint && <div className="set-hint">{hint}</div>}
+      </div>
+      <div className="set-ctl">{children}</div>
+    </div>
+  );
+
+  const settingsPanel = showSettings && (
+    <div className="ask-wrap" onClick={() => setShowSettings(false)}>
+      <div className="setp" onClick={e => e.stopPropagation()}>
+        <div className="dhead" style={{ padding: "0 0 12px" }}>
+          <div>
+            <div className="rec-tag">SETTINGS</div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>What appears on the drawing</div>
+          </div>
+          <button className="btn" onClick={() => setShowSettings(false)}>DONE</button>
+        </div>
+
+        <div className="set-group">ANNOTATIONS</div>
+        <SettingsRow label="Power outlet" hint="Recessed outlet — drawing, parts list, PDF">
+          <Check on={showOutlet} onClick={() => setShowOutlet(!showOutlet)}>PWR</Check>
+        </SettingsRow>
+        <SettingsRow label="Low voltage" hint="LV feed — drawing, parts list, PDF">
+          <Check on={showLowVolt} onClick={() => setShowLowVolt(!showLowVolt)}>LV</Check>
+        </SettingsRow>
+        <SettingsRow label="VESA pattern" hint="Bolt pattern and screw size on the TV">
+          <Check on={showVesa} onClick={() => setShowVesa(!showVesa)}>VESA</Check>
+        </SettingsRow>
+        <SettingsRow label="TV dimensions" hint="Width x height dimension line above the panel">
+          <Check on={showTvDims} onClick={() => setShowTvDims(!showTvDims)}>TV DIMS</Check>
+        </SettingsRow>
+        {showBackBox && (
+          <SettingsRow label="Back box dimensions" hint="Rough-in dims from the box bottom edge">
+            <Check on={showBoxDims} onClick={() => setShowBoxDims(!showBoxDims)}>BOX DIMS</Check>
+          </SettingsRow>
+        )}
+        <SettingsRow label="Tape-out lines" hint="The four lines an installer snaps on the real wall">
+          <Check on={showTapeOut} onClick={() => setShowTapeOut(!showTapeOut)}>TAPE-OUT</Check>
+        </SettingsRow>
+
+        <div className="set-group">LABELS</div>
+        <SettingsRow label="Spell out abbreviations" hint="ABOVE FLOOR instead of AFF, on the drawing and the PDF">
+          <Check on={fullWords} onClick={() => setFullWords(!fullWords)}>FULL WORDS</Check>
+        </SettingsRow>
+        <SettingsRow label="Show legend" hint="What the abbreviations mean">
+          <Check on={showLegend} onClick={() => setShowLegend(!showLegend)}>LEGEND</Check>
+        </SettingsRow>
+        <SettingsRow label="Units" hint="How every dimension is written">
+          <Seg small options={[{ value: "dec", label: ".0" }, { value: "frac", label: "1/8" }, { value: "ftin", label: "FT-IN" }]} value={dispUnits} onChange={setDispUnits}/>
+        </SettingsRow>
+
+        <div className="set-group">DRAWING</div>
+        <SettingsRow label="Snapping" hint="Snap to wall, floor, TV edges and box edges. Hold Alt to override.">
+          <Check on={snapOn} onClick={() => setSnapOn(!snapOn)}>SNAP</Check>
+        </SettingsRow>
+      </div>
     </div>
   );
 
@@ -4090,7 +4143,6 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         )}
       </div>
       <div className="status-right">
-        <Seg small options={[{ value: "dec", label: ".0" }, { value: "frac", label: "1/8" }, { value: "ftin", label: "FT-IN" }]} value={dispUnits} onChange={setDispUnits}/>
         <button className={`diag-badge ${allTestsPass && auditClean ? "ok" : "bad"}`} onClick={() => setShowDiag(!showDiag)}
                 title="Self-test + render audit — click for diagnostics">
           {allTestsPass ? "✓" : "✕"} {selfTest.passed}/{selfTest.total}
@@ -4209,6 +4261,9 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
           </>
         )}
       </div>
+      <button className="btn ghost icon-btn" onClick={() => setShowSettings(true)}
+              title="Settings — what appears on the drawing: annotations, labels, units, snapping"
+              aria-label="Settings">⚙</button>
       <button className={`btn ghost ${overlayCount() > 0 ? "flagged" : ""}`} onClick={() => setShowData(true)}
               title="Edit the product and measurement tables this app calculates from">
         DATA{overlayCount() > 0 ? ` (${overlayCount()})` : ""}
@@ -4280,38 +4335,93 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         </button>
       ))}
       <span className="mk-sep"/>
-      {MARKUP_COLORS.map(c => (
-        <button key={c} className={`mk-sw ${(solo ? solo.color : mkColor) === c ? "on" : ""}`} style={{ background: c }}
-                onClick={() => { setMkColor(c); if (sel.length) patchSel(m => ({ ...m, color: c })); }}
-                title={sel >= 0 ? "Recolour the selected item" : c} aria-label={`colour ${c}`}/>
-      ))}
-      {MARKUP_WIDTHS.map(w => (
-        <button key={w} className={`chip ${(solo ? solo.w : mkWidth) === w ? "on" : ""}`}
-                onClick={() => { setMkWidth(w); if (sel.length) patchSel(m => ({ ...m, w })); }}>
-          {w === 1 ? "THIN" : w === 2 ? "MED" : "BOLD"}
-        </button>
-      ))}
+      {/* Colour and weight sit inline on a wide screen. A tablet's main column
+          is only ~460px, so there they collapse into one style button and the
+          bar stays a single row. */}
+      {!isMobile && !isTablet ? (
+        <>
+          {MARKUP_COLORS.map(c => (
+            <button key={c} className={`mk-sw ${(solo ? solo.color : mkColor) === c ? "on" : ""}`} style={{ background: c }}
+                    onClick={() => { setMkColor(c); if (sel.length) patchSel(m => ({ ...m, color: c })); }}
+                    title={sel.length ? "Recolour the selection" : c} aria-label={`colour ${c}`}/>
+          ))}
+          {MARKUP_WIDTHS.map(w => (
+            <button key={w} className={`chip ${(solo ? solo.w : mkWidth) === w ? "on" : ""}`}
+                    onClick={() => { setMkWidth(w); if (sel.length) patchSel(m => ({ ...m, w })); }}>
+              {w === 1 ? "THIN" : w === 2 ? "MED" : "BOLD"}
+            </button>
+          ))}
+        </>
+      ) : (
+        <div className="menu-wrap">
+          <button className="chip style-btn" onClick={() => setShowStyle(v => !v)} title="Pen colour and weight">
+            <span className="mk-sw sm" style={{ background: solo ? solo.color : mkColor }}/>
+            {(solo ? solo.w : mkWidth) === 1 ? "THIN" : (solo ? solo.w : mkWidth) === 2 ? "MED" : "BOLD"} ▾
+          </button>
+          {showStyle && (
+            <>
+              <div className="menu-backdrop" onClick={() => setShowStyle(false)}/>
+              <div className="menu" style={{ padding: 10 }}>
+                <div className="menu-note" style={{ padding: "0 0 6px" }}>{sel.length ? "Restyle the selection" : "Pen style"}</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  {MARKUP_COLORS.map(c => (
+                    <button key={c} className={`mk-sw ${(solo ? solo.color : mkColor) === c ? "on" : ""}`} style={{ background: c }}
+                            onClick={() => { setMkColor(c); if (sel.length) patchSel(m => ({ ...m, color: c })); }} aria-label={`colour ${c}`}/>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {MARKUP_WIDTHS.map(w => (
+                    <button key={w} className={`chip ${(solo ? solo.w : mkWidth) === w ? "on" : ""}`}
+                            onClick={() => { setMkWidth(w); if (sel.length) patchSel(m => ({ ...m, w })); }}>
+                      {w === 1 ? "THIN" : w === 2 ? "MED" : "BOLD"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <span className="mk-sep"/>
       {sel.length > 0 && <button className="chip on" onClick={deleteSel} title="Delete the selection (or press Delete)">DELETE {sel.length > 1 ? `(${sel.length})` : ""}</button>}
       <button className="chip" onClick={undoMarkup} disabled={!markup.length}>UNDO</button>
       <button className="chip" onClick={() => { setMarkup([]); setSel([]); }} disabled={!markup.length}>CLEAR</button>
-      <span className="mk-sep"/>
-      <button className={`chip ${snapOn ? "on" : ""}`} onClick={() => setSnapOn(v => !v)}
-              title="Snap to wall, floor, TV edges, centreline and box edges — hold Alt to override">
-        {snapOn ? "☑" : "☐"} SNAP
-      </button>
       {underlay && (
         <>
           <span className="mk-sep"/>
-          <button className={`chip ${cropping ? "on" : ""}`}
-                  onClick={() => { setCropping(c => !c); setTool("off"); setCalib(null); }}
-                  title="Drag a box to show only that part of the sheet">CROP</button>
-          {underlay.crop && <button className="chip" onClick={() => setUnderlay(u => u && ({ ...u, crop: null }))}>UNCROP</button>}
-          <button className={`chip ${trace ? "on" : ""}`} onClick={() => setTrace(t => !t)}
-                  title="Dark ink on white and hollow shapes, so the drawing shows through">TRACE</button>
-          <button className={`chip ${tool === "move" ? "on" : ""}`} onClick={() => pickTool("move")} title="Drag the imported drawing into position">MOVE PDF</button>
-          <button className={`chip ${calib?.mode === "two" ? "on" : ""}`} onClick={() => startCalib("two")} title="Click a known dimension, type its true length">2-PT SCALE</button>
-          <button className={`chip ${calib?.mode === "box" ? "on" : ""}`} onClick={() => startCalib("box")} title="Box the TV on the drawing — scales and positions in one move">SNAP TO TV</button>
+          <div className="menu-wrap">
+            <button className={`chip ${(cropping || tool === "move" || calib) ? "on" : ""}`}
+                    onClick={() => setShowPdfMenu(v => !v)} title="Scale, position and clean up the reference drawing">PDF ▾</button>
+            {showPdfMenu && (
+              <>
+                <div className="menu-backdrop" onClick={() => setShowPdfMenu(false)}/>
+                <div className="menu">
+                  <button className="menu-item" onClick={() => { setShowPdfMenu(false); startCalib("box"); }}>
+                    SNAP TO TV<span className="menu-sub">box the drawn panel — scales and positions at once</span>
+                  </button>
+                  <button className="menu-item" onClick={() => { setShowPdfMenu(false); startCalib("two"); }}>
+                    2-POINT SCALE<span className="menu-sub">click a known dimension, type its true length</span>
+                  </button>
+                  <div className="menu-sep"/>
+                  <button className="menu-item" onClick={() => { setShowPdfMenu(false); pickTool("move"); }}>
+                    MOVE DRAWING<span className="menu-sub">drag the sheet into position</span>
+                  </button>
+                  <button className="menu-item" onClick={() => { setShowPdfMenu(false); setCropping(true); setTool("off"); setCalib(null); }}>
+                    CROP SHEET<span className="menu-sub">show only the part of the wall that matters</span>
+                  </button>
+                  {underlay.crop && (
+                    <button className="menu-item" onClick={() => { setShowPdfMenu(false); setUnderlay(u => u && ({ ...u, crop: null })); }}>
+                      REMOVE CROP<span className="menu-sub">show the whole sheet again</span>
+                    </button>
+                  )}
+                  <div className="menu-sep"/>
+                  <button className="menu-item" onClick={() => { setShowPdfMenu(false); setTrace(t => !t); }}>
+                    {trace ? "✓ " : ""}TRACE INK<span className="menu-sub">dark lines on white, hollow TV</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -4565,6 +4675,22 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .startc span { display: block; color: var(--txt2); font-size: 10px; line-height: 1.45; }
         .main-col.dropping { outline: 2px dashed var(--acc); outline-offset: -6px; border-radius: 6px; }
 
+        .btn.icon-btn { padding: 9px 12px; font-size: 14px; line-height: 1; }
+        .style-btn { display: inline-flex; align-items: center; gap: 6px; }
+        .mk-sw.sm { width: 13px; height: 13px; border-width: 1px; }
+
+        /* ---- settings panel ---- */
+        .setp { background: var(--ink2); border: 1px solid var(--line2); border-radius: 8px; padding: 16px;
+                width: min(460px, 100%); max-height: 86vh; overflow-y: auto; }
+        .set-group { font-family: var(--fm); font-size: 8.5px; letter-spacing: 2.5px; font-weight: 700; color: var(--acc);
+                     margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+        .set-group:first-of-type { margin-top: 6px; }
+        .set-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+        .set-row:last-child { border-bottom: none; }
+        .set-label { font-size: 12px; color: var(--txt); }
+        .set-hint { font-size: 10px; color: var(--txt2); margin-top: 2px; line-height: 1.4; }
+        .set-ctl { flex-shrink: 0; }
+
         /* ---- catalog data screen ---- */
         .btn.ghost.flagged { border-color: var(--amber); color: var(--amber); }
         .dwrap { position: fixed; inset: 0; z-index: 1000; background: var(--ink); display: flex; flex-direction: column; }
@@ -4700,7 +4826,6 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
           {importBanner}
           {startPanel}
           {sizeStrip}
-          {toggleStrip}
           {legendPanel}
           {canvas}
           {askDialog}
@@ -4741,6 +4866,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         )}
       </div>
 
+      {settingsPanel}
       {showData && <DataScreen onClose={() => setShowData(false)} onChange={() => setCatalogRev(r => r + 1)}/>}
       {printSvg}
       {diagPanel}

@@ -48,6 +48,8 @@ Field Kit apps, or PNG / SVG.
    survey JSON. Or just start typing wall dimensions.
 3. Set the wall, then pick a TV size from the strip.
 4. Adjust mount height, offsets and hardware in the sidebar.
+   Use the **⚙** gear for what appears on the drawing — annotations, labels,
+   units and snapping.
 5. **EXPORT ▾ → FULL PACK** for PDF + JSON + DXF in one go.
 
 Add it to your home screen on an iPad and it installs as an offline app.
