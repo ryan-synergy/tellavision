@@ -55,7 +55,7 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - Status-bar badge reads **✓ 100/100** (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
 - In the diagnostics panel, run **SWEEP** → **0 failing / ~95 configs**
-  (label-collision audit).
+  (label-collision audit — includes L and XL type runs).
 - EXPORT → FULL PACK produces a JSON download, a DXF download, and opens the
   PDF print window.
 - Mobile width shows the SETUP / DRAWING / SPECS tabs.
@@ -149,6 +149,30 @@ callouts, which is the whole point of where they sit.
   the architect's linework bled through the callout pills and dimension text.
 - BLANK is hidden unless a reference drawing is loaded — there is nothing to
   blank otherwise.
+
+## Drawing type size
+
+Settings → Text size (S / M / L / XL) scales every glyph on the drawing and the
+PDF. `TEXT_SCALES` defines the factors; `S.textScale` reaches `buildSchematic`,
+which derives `FS(n)` from it.
+
+**Scaling the fontSize attributes alone is not enough and will look fine until
+it does not.** Everything derived from a text measurement has to scale with it:
+
+- `textW(str, FS(n))` in every pad and plate-width calculation
+- `packRail(..., TS)` line height and the pad-simulation copy of that maths
+- `railW` — the space reserved for the callout rail. This one is easy to miss;
+  unscaled it lets the wall-height dimension collide with the pills at XL.
+- text baselines and sub-label offsets (`dhMidY + FS(19)`, `wdY + FS(16)`, ...)
+- backing plate heights and offsets
+
+The stress sweep now re-runs the densest shapes at 1.15 and 1.3 for exactly this
+reason — it caught two collisions the manual pass missed. If you add a label,
+add a config here too.
+
+Tape-out vertical labels tuck INWARD from their lines (a centred right-edge
+label bleeds into the callout rail 16px away) and stagger vertically when the TV
+is too narrow to hold both side by side.
 
 ## Label collisions — three rules that keep the drawing readable
 

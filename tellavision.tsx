@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.3.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -637,6 +637,15 @@ const calibrateToBox = (u, box, realW, target) => {
 const MARKUP_TOOLS = ["select", "mask", "pen", "line", "arrow", "rect", "text", "measure"];
 const MARKUP_COLORS = ["#FF3B30", "#FFB000", "#00D68F", "#4A9EFF", "#FFFFFF", "#111111"];
 const MARKUP_WIDTHS = [1, 2, 3.5];
+
+// Drawing type size. Scales every glyph AND the padding, plate and rail-packing
+// maths derived from it, so a bigger label never collides or clips.
+const TEXT_SCALES = [
+  { v: 0.9,  label: "S" },
+  { v: 1,    label: "M" },
+  { v: 1.15, label: "L" },
+  { v: 1.3,  label: "XL" },
+];
 
 // Pen strokes arrive at pointer-event density; thin them before they hit
 // localStorage. Perpendicular-distance decimation, tolerance in inches.
@@ -1894,14 +1903,14 @@ const textW = (str, fontSize) => str.length * fontSize * 0.62;
 // Pack rail entries top-down using each entry's REAL height (pills can have
 // 2 or 3 lines). Deterministic: sorted by anchor Y, ties broken by
 // registration order. ≥8px gap between pill boxes — overlap impossible.
-const packRail = (entries, minY) => {
+const packRail = (entries, minY, ts = 1) => {
   const sorted = entries.map((e, i) => ({ ...e, _i: i }))
     .sort((a, b) => (a.anchorY - b.anchorY) || (a._i - b._i));
   let prevTop = -Infinity, prevH = 0;
   sorted.forEach(e => {
-    const h = 16 + (e.lines.length - 1) * 13; // pill bg + extra text lines
-    const top = Math.max(e.anchorY - 16, prevTop + prevH + 8, minY - 12);
-    e.slotY = top + 12;
+    const h = 16 * ts + (e.lines.length - 1) * 13 * ts; // pill bg + extra text lines
+    const top = Math.max(e.anchorY - 16 * ts, prevTop + prevH + 8, minY - 12 * ts);
+    e.slotY = top + 12 * ts;
     prevTop = top;
     prevH = h;
   });
@@ -1911,7 +1920,8 @@ const packRail = (entries, minY) => {
 // Renders the markup layer for a given inch->pixel frame. Shared by the
 // schematic build and by the live in-progress stroke, so a pen drag repaints a
 // handful of nodes instead of rebuilding several hundred.
-const renderMarkupEls = (items, { wallX, floorY, scale, keyPrefix = "mk", fmt, paper }) => {
+const renderMarkupEls = (items, { wallX, floorY, scale, keyPrefix = "mk", fmt, paper, ts = 1 }) => {
+  const FS = (n) => +(n * ts).toFixed(2);
   const out = [];
   const MX = (pt) => wallX + pt.x * scale;
   const MY = (pt) => floorY - pt.y * scale;
@@ -1951,7 +1961,7 @@ const renderMarkupEls = (items, { wallX, floorY, scale, keyPrefix = "mk", fmt, p
         width={Math.abs(MX(b) - MX(a))} height={Math.abs(MY(b) - MY(a))}
         fill="none" stroke={col} strokeWidth={sw}/>);
     } else if (m.type === "text") {
-      const fs = m.size || 13;
+      const fs = FS(m.size || 13);
       const tw = textW(m.text || "", fs) + 8;
       out.push(<rect key={`${key}-b`} x={MX(a) - 4} y={MY(a) - fs + 1} width={tw} height={fs + 5} rx="2"
         fill={paper || "#FFFFFF"} stroke="none"/>);
@@ -1969,11 +1979,11 @@ const renderMarkupEls = (items, { wallX, floorY, scale, keyPrefix = "mk", fmt, p
       const lbl = fmt ? fmt(markupSpan(m)) : markupSpan(m).toFixed(2);
       const lp = measureLabelPos(x1, y1, x2, y2);
       const lx = lp.x, ly = lp.y;
-      const lw = textW(lbl, 12) + 8;
+      const lw = textW(lbl, FS(12)) + 8;
       out.push(<rect key={`${key}-lb`} x={lx - lw / 2} y={ly - 10} width={lw} height={14} rx="2"
         fill={paper || "#FFFFFF"} stroke="none"/>);
       out.push(<text key={`${key}-l`} x={lx} y={ly + 1} textAnchor="middle" dominantBaseline="middle" fill={col}
-        fontSize="12" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{lbl}</text>);
+        fontSize={FS(12)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{lbl}</text>);
     }
   });
   return out;
@@ -1989,6 +1999,11 @@ const buildSchematic = (S, BASE_P) => {
   } = S;
   const hasUnderlay = !!(underlay && underlay.src && underlay.visible !== false);
   const traceOn = hasUnderlay && S.trace !== false;
+  // Every glyph on the drawing scales from one factor. Crucially the PADDING,
+  // plate widths and rail packing derive from FS() too — scaling the font
+  // attributes alone would leave labels colliding and clipped.
+  const TS = S.textScale || 1;
+  const FS = (n) => +(n * TS).toFixed(2);
   const P = traceOn ? tracePalette(BASE_P) : BASE_P;
   const fmt = (v) => fmtIn(v, dispUnits);
 
@@ -2011,7 +2026,7 @@ const buildSchematic = (S, BASE_P) => {
   const refValue = layout ? (heightRef === "bottom" ? layout.tvBottom : layout.centerH) : 0;
   const leftDimText = layout ? fmt(refValue) : "";
   const leftDimSub = heightRef === "bottom" ? "TO BOTTOM" : "TO CENTER";
-  const leftDimW = Math.max(textW(leftDimText, 13), leftDimSub.length * (8 * 0.62 + 1));
+  const leftDimW = Math.max(textW(leftDimText, FS(13)), leftDimSub.length * (FS(8) * 0.62 + 1));
   const leftPad = layout ? Math.max(basePad, 44 + leftDimW + 16) : basePad;
 
   // Top: TV-width dim sits 18px above the TV; the CL dim needs its own lane
@@ -2026,7 +2041,7 @@ const buildSchematic = (S, BASE_P) => {
 
   // Right: leader rail (when callouts shown) + wall-height dim, both lane-aware.
   // Spelled-out labels need a wider rail (worst case: "LOW VOLTAGE 5' - 3 1/8" ABOVE FLOOR").
-  const railW = fullWords ? 250 : 148;
+  const railW = (fullWords ? 250 : 148) * TS;   // reserved for callout pills — scales with the type
   const hasRail = layout && (showVesa || layout.box || showOutlet || showLowVolt);
   let hDimRelX = safeWallW * scale + 32; // relative to wallX
   if (hasRail) {
@@ -2034,7 +2049,7 @@ const buildSchematic = (S, BASE_P) => {
     const railRightRel = tvRightRel + 16 + railW;
     if (hDimRelX < railRightRel + 12) hDimRelX = railRightRel + 12;
   }
-  const rightPad = (hDimRelX - safeWallW * scale) + 24 + textW(`${safeWallH}" H`, 13) + 12;
+  const rightPad = (hDimRelX - safeWallW * scale) + 24 + textW(`${safeWallH}" H`, FS(13)) + 12;
 
   const hasTitleBlock = !!(projectName || clientName);
   const tbDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
@@ -2061,8 +2076,8 @@ const buildSchematic = (S, BASE_P) => {
     ents.map((e, i) => ({ ...e, _i: i }))
       .sort((x, y) => (x.a - y.a) || (x._i - y._i))
       .forEach(e => {
-        const h = 16 + (e.n - 1) * 13;
-        const top = Math.max(e.a - 16, prevTop + prevH + 8, topFloor);
+        const h = 16 * TS + (e.n - 1) * 13 * TS;
+        const top = Math.max(e.a - 16 * TS, prevTop + prevH + 8, topFloor);
         railBottomRel = top + h;
         prevTop = top;
         prevH = h;
@@ -2071,7 +2086,7 @@ const buildSchematic = (S, BASE_P) => {
   // wall width + side pads are already fixed here, so the bottom-row fit
   // check is exact: stack title and NTS when one row can't hold both
   const svgWForRow = safeWallW * scale + leftPad + (layout ? Math.max(basePad, 88) : Math.max(basePad, 88));
-  const twoLineBottom = hasTitleBlock && (textW(titleStr, 9) + textW(ntsStr, 9) + 48 > svgWForRow);
+  const twoLineBottom = hasTitleBlock && (textW(titleStr, FS(9)) + textW(ntsStr, FS(9)) + 48 > svgWForRow);
   const bottomPad = Math.max(
     basePad + 26 + (hasTitleBlock ? (twoLineBottom ? 30 : 16) : 0),
     railBottomRel - safeWallH * scale + 30 + (hasTitleBlock ? (twoLineBottom ? 30 : 16) : 0)
@@ -2139,7 +2154,7 @@ const buildSchematic = (S, BASE_P) => {
   // hiding our own TV, dimensions or callouts.
   const masks = (markup || []).filter(m => m && m.type === "mask");
   if (masks.length) {
-    renderMarkupEls(masks, { wallX, floorY, scale, keyPrefix: K("mask"), fmt, paper: P.maskFill })
+    renderMarkupEls(masks, { wallX, floorY, scale, keyPrefix: K("mask"), fmt, paper: P.maskFill, ts: TS })
       .forEach(el => elements.push(el));
   }
 
@@ -2169,14 +2184,14 @@ const buildSchematic = (S, BASE_P) => {
 
   // pill helper — filled (screen) or outlined (print)
   const pushPill = (key, x, y, lines, color) => {
-    const w = Math.max(...lines.map(l => textW(l.text, l.size))) + 14;
+    const w = Math.max(...lines.map(l => textW(l.text, FS(l.size)))) + 14;
     const filled = P.pillStyle === "filled";
-    elements.push(<rect key={K(`${key}-bg`)} x={x} y={y - 12} width={w} height={16} rx="2"
+    elements.push(<rect key={K(`${key}-bg`)} x={x} y={y - 12 * TS} width={w} height={16 * TS} rx="2"
       fill={filled ? color : P.canvas} stroke={filled ? P.canvas : color} strokeWidth={filled ? 0.8 : 1.1}/>);
     lines.forEach((l, i) => {
       const fill = i === 0 ? (filled ? P.pillText : color) : color;
-      elements.push(<text key={K(`${key}-t${i}`)} x={x + 6} y={y - 1 + i * 13} textAnchor="start"
-        fill={fill} fontSize={l.size} fontFamily="'IBM Plex Mono', monospace"
+      elements.push(<text key={K(`${key}-t${i}`)} x={x + 6} y={y - 1 + i * 13 * TS} textAnchor="start"
+        fill={fill} fontSize={FS(l.size)} fontFamily="'IBM Plex Mono', monospace"
         fontWeight={i === 0 ? 700 : 500} letterSpacing="0.3">{l.text}</text>);
     });
     return w;
@@ -2195,7 +2210,7 @@ const buildSchematic = (S, BASE_P) => {
     elements.push(<rect key={K("tv")} x={tvX} y={tvY} width={tvPxW} height={tvPxH} fill={P.tvFill} stroke={P.tvStroke} strokeWidth="1.5"/>);
     elements.push(<rect key={K("tvscreen")} x={tvX + 3} y={tvY + 3} width={tvPxW - 6} height={tvPxH - 6} fill={P.screenFill} stroke="none"/>);
     if (tvPxW > 120) {
-      elements.push(<text key={K("tvlabel")} x={tvX + 8} y={tvY + 16} textAnchor="start" fill={P.tvLabel} fontSize="10" fontFamily="'Space Grotesk', sans-serif" letterSpacing="1" fontWeight="500">{brand.toUpperCase()} {selectedSize}"</text>);
+      elements.push(<text key={K("tvlabel")} x={tvX + 8} y={tvY + 16} textAnchor="start" fill={P.tvLabel} fontSize={FS(10)} fontFamily="'Space Grotesk', sans-serif" letterSpacing="1" fontWeight="500">{brand.toUpperCase()} {selectedSize}"</text>);
     }
 
     // VESA + mount plate
@@ -2262,7 +2277,7 @@ const buildSchematic = (S, BASE_P) => {
         { text: layout.box.label, size: 10 },
         { text: layout.box.brand, size: 9 },
       ];
-      if (layout.box.extendsOff) lines.push({ text: "! EXTENDS BEYOND TV", size: 8 });
+      if (layout.box.extendsOff) lines.push({ text: "! EXTENDS BEYOND TV", size: 9 });
       if (showBoxDims) {
         lines.push({ text: `BOX ${W.BTM} ${fmt(layout.box.btm)} ${W.AFF}`, size: 9 });
         const d = layout.box.btm - layout.tvBottom;
@@ -2286,7 +2301,7 @@ const buildSchematic = (S, BASE_P) => {
       const lx = wallX + layout.lv.x * scale;
       const ly = floorY - layout.lv.aff * scale;
       elements.push(<rect key={K("lv")} x={lx - 6} y={ly - 5} width={12} height={10} fill={P.halo} stroke={P.lv} strokeWidth="1.4"/>);
-      elements.push(<text key={K("lvt")} x={lx} y={ly + 3} textAnchor="middle" fill={P.lv} fontSize="7" fontFamily="'IBM Plex Mono', monospace" fontWeight="700">LV</text>);
+      elements.push(<text key={K("lvt")} x={lx} y={ly + 3} textAnchor="middle" fill={P.lv} fontSize={FS(7)} fontFamily="'IBM Plex Mono', monospace" fontWeight="700">LV</text>);
       rail.push({
         id: "lv", color: P.lv, anchor: [lx + 6, ly], anchorY: ly,
         lines: [{ text: `${W.LV} ${fmt(layout.lv.aff)} ${W.AFF}`, size: 10 }, { text: sideOf(layout.lv.x), size: 9 }],
@@ -2297,7 +2312,7 @@ const buildSchematic = (S, BASE_P) => {
         id: "tape", color: P.tape,
         anchor: [tvX + tvPxW - 4, floorY - layout.tvTop * scale],
         anchorY: floorY - layout.tvTop * scale,
-        lines: [{ text: "TAPE-OUT", size: 10 }, { text: "VERTICALS FROM LEFT WALL", size: 8 }],
+        lines: [{ text: "TAPE-OUT", size: 10 }, { text: "VERTICALS FROM LEFT WALL", size: 9 }],
       });
     }
 
@@ -2324,13 +2339,13 @@ const buildSchematic = (S, BASE_P) => {
       elements.push(<path key={K("tr-a2")} d={`M${ax - 3} ${yB - 6} L${ax} ${yB} L${ax + 3} ${yB - 6}`} stroke={P.lineSoft} fill="none" strokeWidth="1"/>);
       rail.push({
         id: "travel", color: P.lineSoft, anchor: [tvX + tvPxW - 4, yT], anchorY: yT,
-        lines: [{ text: `TV ADJUST ±${fmt(travelIn)}`, size: 10 }, { text: "FA BRACKET — VERIFY SPEC", size: 8 }],
+        lines: [{ text: `TV ADJUST ±${fmt(travelIn)}`, size: 10 }, { text: "FA BRACKET — VERIFY SPEC", size: 9 }],
       });
     }
 
     labelStart = elements.length;
     const railX = tvX + tvPxW + 16;
-    packRail(rail, showTvDims ? tvY + 2 : wallY + 10).forEach(e => {
+    packRail(rail, showTvDims ? tvY + 2 : wallY + 10, TS).forEach(e => {
       elements.push(<line key={K(`${e.id}-leader`)} x1={e.anchor[0]} y1={e.anchor[1]} x2={railX - 4} y2={e.slotY - 4} stroke={e.color} strokeWidth="0.8" opacity="0.7"/>);
       pushPill(e.id, railX, e.slotY, e.lines, e.color);
     });
@@ -2344,10 +2359,10 @@ const buildSchematic = (S, BASE_P) => {
     elements.push(<line key={K("dha")} x1={dimX - 4} y1={floorY} x2={dimX + 4} y2={floorY} stroke={P.line} strokeWidth={P.dimW}/>);
     elements.push(<line key={K("dhb")} x1={dimX - 4} y1={refY} x2={dimX + 4} y2={refY} stroke={P.line} strokeWidth={P.dimW}/>);
     const dhMidY = (floorY + refY) / 2;
-    const dhW = textW(leftDimText, 13) + 8;
-    elements.push(<rect key={K("dhbg")} x={dimX - 8 - dhW} y={dhMidY - 12} width={dhW + 4} height={35} fill={P.halo} stroke="none" rx="2"/>);
-    elements.push(<text key={K("dht")} x={dimX - 8} y={dhMidY + 4} textAnchor="end" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{leftDimText}</text>);
-    elements.push(<text key={K("dhl")} x={dimX - 8} y={dhMidY + 19} textAnchor="end" fill={P.dimSub} fontSize="8" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{refLabel}</text>);
+    const dhW = textW(leftDimText, FS(13)) + 8;
+    elements.push(<rect key={K("dhbg")} x={dimX - 8 - dhW} y={dhMidY - FS(12)} width={dhW + 4} height={FS(35)} fill={P.halo} stroke="none" rx="2"/>);
+    elements.push(<text key={K("dht")} x={dimX - 8} y={dhMidY + FS(4)} textAnchor="end" fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{leftDimText}</text>);
+    elements.push(<text key={K("dhl")} x={dimX - 8} y={dhMidY + FS(19)} textAnchor="end" fill={P.dimSub} fontSize={FS(8)} fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{refLabel}</text>);
     elements.push(<line key={K("reft1")} x1={tvX - 12} y1={refY} x2={tvX} y2={refY} stroke={P.cl} strokeWidth="1.5"/>);
     elements.push(<line key={K("reft2")} x1={tvX + tvPxW} y1={refY} x2={tvX + tvPxW + 12} y2={refY} stroke={P.cl} strokeWidth="1.5"/>);
 
@@ -2359,9 +2374,9 @@ const buildSchematic = (S, BASE_P) => {
       elements.push(<line key={K("dwa")} x1={tvX} y1={dimY - 4} x2={tvX} y2={dimY + 4} stroke={P.line} strokeWidth={P.dimW}/>);
       elements.push(<line key={K("dwb")} x1={tvX + tvPxW} y1={dimY - 4} x2={tvX + tvPxW} y2={dimY + 4} stroke={P.line} strokeWidth={P.dimW}/>);
       const dwMidX = tvX + tvPxW / 2;
-      const dwW = textW(wTxt, 13) + 8;
-      elements.push(<rect key={K("dwbg")} x={dwMidX - dwW / 2} y={dimY - 18} width={dwW} height={16} fill={P.halo} stroke="none" rx="2"/>);
-      elements.push(<text key={K("dwt")} x={dwMidX} y={dimY - 6} textAnchor="middle" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wTxt}</text>);
+      const dwW = textW(wTxt, FS(13)) + 8;
+      elements.push(<rect key={K("dwbg")} x={dwMidX - dwW / 2} y={dimY - FS(18)} width={dwW} height={FS(16)} fill={P.halo} stroke="none" rx="2"/>);
+      elements.push(<text key={K("dwt")} x={dwMidX} y={dimY - FS(6)} textAnchor="middle" fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wTxt}</text>);
     }
 
     // centerline (top, lane 1 — steps above the width dim when crowded) +
@@ -2373,9 +2388,9 @@ const buildSchematic = (S, BASE_P) => {
     elements.push(<line key={K("cl-db")} x1={clPx} y1={clDimY - 4} x2={clPx} y2={clDimY + 4} stroke={P.cl} strokeWidth={P.dimW}/>);
     const clTxt = `${fmt(layout.tvCL)} TO TV ${W.CL}`;
     const clMidX = (wallX + clPx) / 2;
-    const clW = textW(clTxt, 10) + 8;
-    elements.push(<rect key={K("cl-bg")} x={clMidX - clW / 2} y={clDimY - 16} width={clW} height={13} fill={P.halo} stroke="none" rx="2"/>);
-    elements.push(<text key={K("cl-t")} x={clMidX} y={clDimY - 6} textAnchor="middle" fill={P.cl} fontSize="10" fontWeight="600" fontFamily="'IBM Plex Mono', monospace" letterSpacing="0.5">{clTxt}</text>);
+    const clW = textW(clTxt, FS(10)) + 8;
+    elements.push(<rect key={K("cl-bg")} x={clMidX - clW / 2} y={clDimY - FS(16)} width={clW} height={FS(13)} fill={P.halo} stroke="none" rx="2"/>);
+    elements.push(<text key={K("cl-t")} x={clMidX} y={clDimY - FS(6)} textAnchor="middle" fill={P.cl} fontSize={FS(10)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace" letterSpacing="0.5">{clTxt}</text>);
 
     // tape-out mode: the four lines an installer actually snaps on the wall
     if (showTapeOut) {
@@ -2383,17 +2398,29 @@ const buildSchematic = (S, BASE_P) => {
       const tBtm = floorY - layout.tvBottom * scale;
       [["t-top", tTop, `TOP ${fmt(layout.tvTop)} ${W.AFF}`], ["t-btm", tBtm, `${W.BTM} ${fmt(layout.tvBottom)} ${W.AFF}`]].forEach(([id, y, txt]) => {
         elements.push(<line key={K(id)} x1={wallX + 2} y1={y} x2={wallX + wallPxW - 2} y2={y} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
-        const w = textW(txt, 10) + 10;
-        elements.push(<rect key={K(`${id}-bg`)} x={wallX + 6} y={y - 14} width={w} height={13} fill={P.halo} rx="2"/>);
-        elements.push(<text key={K(`${id}-t`)} x={wallX + 11} y={y - 4} fill={P.tape} fontSize="10" fontWeight="700" fontFamily="'IBM Plex Mono', monospace">{txt}</text>);
+        const w = textW(txt, FS(10)) + 10;
+        elements.push(<rect key={K(`${id}-bg`)} x={wallX + 6} y={y - FS(14)} width={w} height={FS(13)} fill={P.halo} rx="2"/>);
+        elements.push(<text key={K(`${id}-t`)} x={wallX + 11} y={y - FS(4)} fill={P.tape} fontSize={FS(10)} fontWeight="700" fontFamily="'IBM Plex Mono', monospace">{txt}</text>);
       });
-      [["t-l", layout.tvLeft], ["t-r", layout.tvRight]].forEach(([id, v]) => {
-        const x = wallX + v * scale;
-        elements.push(<line key={K(id)} x1={x} y1={tTop} x2={x} y2={floorY - 2} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
+      // The vertical tape labels tuck INWARD from their lines rather than
+      // centring on them: a centred right-edge label bleeds into the callout
+      // rail, which starts just 16px beyond the TV. On a narrow TV the two
+      // would then meet in the middle, so when the span cannot hold both they
+      // stagger vertically instead — the usual CAD answer to a tight dimension.
+      const tapeV = [["t-l", layout.tvLeft, 1], ["t-r", layout.tvRight, -1]].map(([id, v, dir]) => {
         const txt = fmt(v);
-        const w = textW(txt, 10) + 10;
-        elements.push(<rect key={K(`${id}-bg`)} x={x - w / 2} y={floorY - 24} width={w} height={13} fill={P.halo} rx="2"/>);
-        elements.push(<text key={K(`${id}-t`)} x={x} y={floorY - 14} textAnchor="middle" fill={P.tape} fontSize="10" fontWeight="700" fontFamily="'IBM Plex Mono', monospace">{txt}</text>);
+        return { id, v, dir, txt, x: wallX + v * scale, w: textW(txt, FS(10)) + 10 };
+      });
+      const [tL, tR] = tapeV;
+      const tight = (tR.x - 4 - tR.w) < (tL.x + 4 + tL.w);
+      tapeV.forEach((e, i) => {
+        elements.push(<line key={K(e.id)} x1={e.x} y1={tTop} x2={e.x} y2={floorY - 2} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
+        const row = tight && i === 1 ? FS(13) + 3 : 0;          // drop the right one a line
+        const bx = e.dir > 0 ? e.x + 4 : e.x - 4 - e.w;
+        elements.push(<rect key={K(`${e.id}-bg`)} x={bx} y={floorY - FS(24) + row} width={e.w} height={FS(13)} fill={P.halo} rx="2"/>);
+        elements.push(<text key={K(`${e.id}-t`)} x={e.dir > 0 ? e.x + 9 : e.x - 9} y={floorY - FS(14) + row}
+          textAnchor={e.dir > 0 ? "start" : "end"} fill={P.tape} fontSize={FS(10)} fontWeight="700"
+          fontFamily="'IBM Plex Mono', monospace">{e.txt}</text>);
       });
     }
   }
@@ -2406,9 +2433,9 @@ const buildSchematic = (S, BASE_P) => {
   elements.push(<line key={K("wwa")} x1={wallX} y1={wdY - 4} x2={wallX} y2={wdY + 4} stroke={P.line} strokeWidth={P.dimW}/>);
   elements.push(<line key={K("wwb")} x1={wallX + wallPxW} y1={wdY - 4} x2={wallX + wallPxW} y2={wdY + 4} stroke={P.line} strokeWidth={P.dimW}/>);
   const wwTxt = `${fmtIn(safeWallW, dispUnits)} WALL`;
-  const wwW = textW(wwTxt, 13) + 10;
-  elements.push(<rect key={K("wwbg")} x={wallX + wallPxW / 2 - wwW / 2} y={wdY + 4} width={wwW} height={17} rx="2" fill={P.halo} stroke="none"/>);
-  elements.push(<text key={K("wwt")} x={wallX + wallPxW / 2} y={wdY + 16} textAnchor="middle" fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wwTxt}</text>);
+  const wwW = textW(wwTxt, FS(13)) + 10;
+  elements.push(<rect key={K("wwbg")} x={wallX + wallPxW / 2 - wwW / 2} y={wdY + 4} width={wwW} height={FS(17)} rx="2" fill={P.halo} stroke="none"/>);
+  elements.push(<text key={K("wwt")} x={wallX + wallPxW / 2} y={wdY + FS(16)} textAnchor="middle" fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wwTxt}</text>);
 
   // wall height (right, lane-aware)
   const whX = wallX + hDimRelX;
@@ -2416,25 +2443,25 @@ const buildSchematic = (S, BASE_P) => {
   elements.push(<line key={K("wha")} x1={whX - 4} y1={wallY} x2={whX + 4} y2={wallY} stroke={P.line} strokeWidth={P.dimW}/>);
   elements.push(<line key={K("whb")} x1={whX - 4} y1={floorY} x2={whX + 4} y2={floorY} stroke={P.line} strokeWidth={P.dimW}/>);
   const whTxt = `${fmtIn(safeWallH, dispUnits)} H`;
-  const whW = textW(whTxt, 13) + 10;
-  elements.push(<rect key={K("whbg")} x={whX + 4} y={(wallY + floorY) / 2 - 8} width={whW} height={17} rx="2" fill={P.halo} stroke="none"/>);
-  elements.push(<text key={K("wht")} x={whX + 8} y={(wallY + floorY) / 2 + 4} fill={P.dimText} fontSize="13" fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{whTxt}</text>);
+  const whW = textW(whTxt, FS(13)) + 10;
+  elements.push(<rect key={K("whbg")} x={whX + 4} y={(wallY + floorY) / 2 - FS(8)} width={whW} height={FS(17)} rx="2" fill={P.halo} stroke="none"/>);
+  elements.push(<text key={K("wht")} x={whX + 8} y={(wallY + floorY) / 2 + FS(4)} fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{whTxt}</text>);
 
   // Hand markup goes ABOVE the geometry but BELOW the annotation layer, so a
   // scribbled line cannot strike through a dimension the installer has to read.
   // Blanking patches are excluded — they were painted under the schematic.
   const inkMarkup = (markup || []).filter(m => m && m.type !== "mask");
   if (inkMarkup.length) {
-    const inkEls = renderMarkupEls(inkMarkup, { wallX, floorY, scale, keyPrefix: K("mk"), fmt, paper: P.maskFill });
+    const inkEls = renderMarkupEls(inkMarkup, { wallX, floorY, scale, keyPrefix: K("mk"), fmt, paper: P.maskFill, ts: TS });
     elements.splice(labelStart < 0 ? elements.length : labelStart, 0, ...inkEls);
   }
 
   // title block + NTS note — stacked on two rows when one can't hold both
   const tbY = svgH - 10;
   if (hasTitleBlock) {
-    elements.push(<text key={K("tb")} x={16} y={twoLineBottom ? tbY - 14 : tbY} textAnchor="start" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{titleStr}</text>);
+    elements.push(<text key={K("tb")} x={16} y={twoLineBottom ? tbY - 14 : tbY} textAnchor="start" fill={P.title} fontSize={FS(9)} fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{titleStr}</text>);
   }
-  elements.push(<text key={K("nts")} x={svgW - 16} y={tbY} textAnchor="end" fill={P.title} fontSize="9" fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{ntsStr}</text>);
+  elements.push(<text key={K("nts")} x={svgW - 16} y={tbY} textAnchor="end" fill={P.title} fontSize={FS(9)} fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{ntsStr}</text>);
 
   return { elements, svgW, svgH, scale, wallX, wallY, floorY, P, traceOn };
 };
@@ -2462,6 +2489,17 @@ const sweepConfigs = () => {
     cfgs.push({ ...base, name: `${brand} ${small} low mount`, brand, selectedSize: small, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false, heightRef: "bottom", override: "12" });
     cfgs.push({ ...base, name: `${brand} ${small} mobile/frac/fp`, brand, selectedSize: small, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "frac", hasFireplace: true, isMobile: true, viewportW: 375 });
   });
+  // Re-run the densest shapes at the largest type. Text size scales the pads,
+  // the plate widths and the rail packing; XL is where those break first.
+  const xl = [
+    { name: "XL type · 85 fp mantel ftin fullwords", brand: "Sony", selectedSize: 85, wallW: 110, wallH: 100, mountSystem: "fa", dispUnits: "ftin", hasFireplace: true, fullWords: true, showTapeOut: true },
+    { name: "XL type · 115 giant wall", brand: "Samsung", selectedSize: 115, wallW: 300, wallH: 140, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: false, fullWords: true },
+    { name: "XL type · 32 cramped 60×72", brand: "Samsung", selectedSize: 32, wallW: 60, wallH: 72, mountSystem: "fa", dispUnits: "ftin", hasFireplace: false, fullWords: true, heightRef: "bottom" },
+    { name: "XL type · 65 mobile", brand: "Sony", selectedSize: 65, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "frac", hasFireplace: true, isMobile: true, viewportW: 375, fullWords: true },
+  ];
+  [1.15, 1.3].forEach(tsv => xl.forEach(c =>
+    cfgs.push({ ...base, ...c, name: `${c.name} @${tsv}`, textScale: tsv, showTapeOut: true })));
+
   cfgs.push({ ...base, name: "offsets fb+20 tv−15 ftin", brand: "Sony", selectedSize: 65, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: true, fbOffsetIn: 20, tvOffsetIn: -15 });
   cfgs.push({ ...base, name: "small wall 84×84 ftin", brand: "Samsung", selectedSize: 43, wallW: 84, wallH: 84, mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "ftin", hasFireplace: false });
   cfgs.push({ ...base, name: "narrow wall 70×96 mobile", brand: "LG", selectedSize: 48, wallW: 70, wallH: 96, mountSystem: "fa", dispUnits: "frac", hasFireplace: false, isMobile: true, viewportW: 375 });
@@ -2971,6 +3009,7 @@ export default function App() {
   const [underlayNote, setUnderlayNote] = useState(null);
   const [markup, setMarkup] = useState(Array.isArray(SAVED.markup) ? SAVED.markup : []);
   const [tool, setTool] = useState("off");   // "off" | "move" | one of MARKUP_TOOLS
+  const [textScale, setTextScale] = useState(TEXT_SCALES.some(t => t.v === SAVED.textScale) ? SAVED.textScale : 1);
   const [trace, setTrace] = useState(SAVED.trace !== false);  // ink tuned for tracing over a scan
   const [showData, setShowData] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -3027,7 +3066,7 @@ export default function App() {
     try {
       const { src, ...underlayMeta } = underlay || {};
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        markup, mkColor, mkWidth, trace, snapOn,
+        markup, mkColor, mkWidth, trace, snapOn, textScale,
         underlay: underlay ? underlayMeta : null,
         wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
         mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
@@ -3038,7 +3077,7 @@ export default function App() {
         projectName, clientName, revision, dispUnits,
       }));
     } catch { /* storage unavailable — run without persistence */ }
-  }, [markup, mkColor, mkWidth, trace, snapOn, underlay,
+  }, [markup, mkColor, mkWidth, trace, snapOn, textScale, underlay,
       wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel,
       mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX,
       mountSystem, sanusStyle, sanusMountModel, tvWeight,
@@ -3115,18 +3154,18 @@ export default function App() {
     mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem,
     showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut,
     showTravel, travelIn, fullWords, projectName, clientName, revision,
-    dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev,
+    dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale,
   };
   const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt,
      showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords,
-     projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev]);
+     projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale]);
   const printSchem = useMemo(() => buildSchematic({ ...schemState, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt,
      showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords,
-     projectName, clientName, revision, dispUnits, underlay, markup, trace, catalogRev]);
+     projectName, clientName, revision, dispUnits, underlay, markup, trace, catalogRev, textScale]);
 
   const svgRef = useRef(null);
   const printRef = useRef(null);
@@ -4099,6 +4138,10 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         </SettingsRow>
         <SettingsRow label="Show legend" hint="What the abbreviations mean">
           <Check on={showLegend} onClick={() => setShowLegend(!showLegend)}>LEGEND</Check>
+        </SettingsRow>
+        <SettingsRow label="Text size" hint="Type size for every dimension and callout on the drawing and the PDF">
+          <Seg small options={TEXT_SCALES.map(t => ({ value: String(t.v), label: t.label }))}
+               value={String(textScale)} onChange={(v) => setTextScale(parseFloat(v))}/>
         </SettingsRow>
         <SettingsRow label="Units" hint="How every dimension is written">
           <Seg small options={[{ value: "dec", label: ".0" }, { value: "frac", label: "1/8" }, { value: "ftin", label: "FT-IN" }]} value={dispUnits} onChange={setDispUnits}/>

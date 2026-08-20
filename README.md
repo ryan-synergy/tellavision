@@ -49,7 +49,7 @@ Field Kit apps, or PNG / SVG.
 3. Set the wall, then pick a TV size from the strip.
 4. Adjust mount height, offsets and hardware in the sidebar.
    Use the **⚙** gear for what appears on the drawing — annotations, labels,
-   units and snapping.
+   text size (S/M/L/XL), units and snapping.
 5. **EXPORT ▾ → FULL PACK** for PDF + JSON + DXF in one go.
 
 Add it to your home screen on an iPad and it installs as an offline app.
@@ -165,8 +165,9 @@ The app self-tests on every load. The badge in the status bar is the contract:
 - **✓ 100/100** embedded self-tests — golden hand-computed cases, catalog
   invariants, snapping, markup geometry, JSON interop. If this is red, do not
   trust the drawing.
-- **SWEEP** in the diagnostics panel — 95 hostile configurations checked for
-  label collisions. Must read `0 failing`.
+- **SWEEP** in the diagnostics panel — 103 hostile configurations checked for
+  label collisions, including runs at the largest text size. Must read
+  `0 failing`.
 - **Render audit** — measures every text bounding box for overlaps and
   clipping. Must read `0 overlaps · 0 clipped`.
 
