@@ -104,7 +104,13 @@ traced to manufacturer documents rather than transcribed from a catalog page.
 |---|---|---|
 | Future Automation WB / WB-2S | 2026-08-19 | Manufacturer technical sheets + the WB21/26/31-2S installation guide |
 | SnapAV Strong VersaBox / Pro | 2026-08-19 | Snap One installation manuals and dimensioned drawings |
-| Sanus in-wall mounts | not verified | Catalog figures — treat capacity and VESA limits as indicative |
+| Sanus Black Series mounts | 2026-08-20 | SANUS Black Series literature (`SANBLK0919_web.pdf`) — every model's spec block |
+
+A panel's VESA pattern must fall **inside** the mount's published min–max
+range. Checking only the maximum reported a Sony 42" (100×100) as compatible
+with a CILT1 whose minimum is 200×200 — it will not bolt up without an adapter.
+The app now flags that, and SANUS does not publish a swivel figure for this
+line, so none is shown.
 
 **A note worth reading if you edit this data.** Both back box manufacturers name
 their products **height-first** — "WB21", "8 x 14", "14 x 20" — and both were
@@ -154,7 +160,7 @@ python3 -m http.server 5173
 
 The app self-tests on every load. The badge in the status bar is the contract:
 
-- **✓ 92/92** embedded self-tests — golden hand-computed cases, catalog
+- **✓ 100/100** embedded self-tests — golden hand-computed cases, catalog
   invariants, snapping, markup geometry, JSON interop. If this is red, do not
   trust the drawing.
 - **SWEEP** in the diagnostics panel — 95 hostile configurations checked for

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -136,14 +136,38 @@ const LEGACY_BOX_KEYS = {
 };
 const canonBoxKey = (k) => LEGACY_BOX_KEYS[k] || k;
 
+// Sanus Black Series (a.k.a. Choice Collection) custom-install mounts.
+//
+// VERIFIED 2026-08-20 against SANUS's own Black Series literature,
+// sanus.com/assets/literature/pdf/SANBLK0919_web.pdf — every model has a spec
+// block there giving VESA min/max, capacity, depth, extension, tilt, suggested
+// screen range, list price and product dimensions. All seven were already
+// correct; unlike the back boxes, nothing here was transposed.
+//
+// Field notes, so the next person does not "fix" a correct value:
+//  * plateW/plateH are the PRODUCT dimensions (w x h) — the physical extent of
+//    the mount, which is what the elevation draws. Sanus also prints a separate
+//    wall-plate drawing; do not mix the two.
+//  * depth is the spec-block DEPTH, which differs by a few hundredths from the
+//    product-dimension depth on some models (CILT1 2.2 vs 2.18, CIXT1 2.5 vs
+//    2.41). The DEPTH field is the one Sanus quotes, so it is the one used.
+//  * list is LIST PRICE. MSRP is lower and is not carried here.
+//  * vesaMin matters: a panel whose pattern is SMALLER than the mount's minimum
+//    will not bolt up without an adapter. Checking only the max reported a
+//    Sony 42" (100x100) as compatible with CILT1 (min 200x200).
+//  * SANUS does not publish a swivel figure for this line — the literature
+//    lists Extension and Tilt only. Two invented swivel numbers were removed
+//    on 2026-08-20 rather than shipping unsourced angles.
+//  * CIXT1 ships with extender brackets, so its footprint is a RANGE.
+//    plateWMax/plateHMax carry the extended size.
 const BASE_SANUS_MOUNTS = {
-  "S-CILF230": { model: "CILF230-G1", name: "Large Full Motion", style: "fullmotion", tvMin: 46, tvMax: 95, capLbs: 175, vesaMaxW: 600, vesaMaxH: 400, depth: 2.46, ext: 30, plateW: 36.73, plateH: 22.03, tilt: "+5/-15", swivel: 55, list: 499.99 },
-  "S-CILF226": { model: "CILF226-B1", name: "Large Full Motion", style: "fullmotion", tvMin: 37, tvMax: 80, capLbs: 135, vesaMaxW: 600, vesaMaxH: 400, depth: 2.4, ext: 26, plateW: 27.59, plateH: 19.55, tilt: "+5/-15", swivel: 49, list: 299.99 },
-  "S-CILT2":   { model: "CILT2-B1", name: "Large Advanced Tilt", style: "tilt", tvMin: 37, tvMax: 90, capLbs: 150, vesaMaxW: 690, vesaMaxH: 415, depth: 2.75, ext: 5.75, plateW: 30, plateH: 18.11, tilt: "+7/-12", swivel: null, list: 279.99 },
-  "S-CILT1":   { model: "CILT1-B1", name: "Large Tilting", style: "tilt", tvMin: 37, tvMax: 95, capLbs: 180, vesaMaxW: 690, vesaMaxH: 415, depth: 2.2, ext: null, plateW: 30, plateH: 17.53, tilt: "+7/-10", swivel: null, list: 249.99 },
-  "S-CIXT1":   { model: "CIXT1-B1", name: "Extra Large Tilting", style: "tilt", tvMin: 40, tvMax: 110, capLbs: 300, vesaMaxW: 1100, vesaMaxH: 800, depth: 2.5, ext: null, plateW: 33.43, plateH: 17.53, tilt: "+7/-10", swivel: null, list: 299.99, note: "Extender brackets included" },
-  "S-CILL2":   { model: "CILL2-B1", name: "Large Fixed", style: "fixed", tvMin: 37, tvMax: 90, capLbs: 150, vesaMaxW: 825, vesaMaxH: 500, depth: 0.55, ext: null, plateW: 35.26, plateH: 22.1, tilt: null, swivel: null, list: 199.99 },
-  "S-CILL1":   { model: "CILL1-B1", name: "Large Fixed", style: "fixed", tvMin: 37, tvMax: 95, capLbs: 180, vesaMaxW: 690, vesaMaxH: 415, depth: 1.6, ext: null, plateW: 30, plateH: 17.53, tilt: null, swivel: null, list: 199.99 },
+  "S-CILF230": { model: "CILF230-G1", name: "Large Full Motion", style: "fullmotion", tvMin: 46, tvMax: 95, capLbs: 175, vesaMinW: 200, vesaMinH: 200, vesaMaxW: 600, vesaMaxH: 400, depth: 2.46, ext: 30, plateW: 36.73, plateH: 22.03, tilt: "+5/-15", swivel: null, list: 499.99 },
+  "S-CILF226": { model: "CILF226-B1", name: "Large Full Motion", style: "fullmotion", tvMin: 37, tvMax: 80, capLbs: 135, vesaMinW: 200, vesaMinH: 200, vesaMaxW: 600, vesaMaxH: 400, depth: 2.4, ext: 26, plateW: 27.59, plateH: 19.55, tilt: "+5/-15", swivel: null, list: 299.99 },
+  "S-CILT2":   { model: "CILT2-B1", name: "Large Advanced Tilt", style: "tilt", tvMin: 37, tvMax: 90, capLbs: 150, vesaMinW: 200, vesaMinH: 100, vesaMaxW: 690, vesaMaxH: 415, depth: 2.75, ext: 5.75, plateW: 30, plateH: 18.11, tilt: "+7/-12", swivel: null, list: 279.99 },
+  "S-CILT1":   { model: "CILT1-B1", name: "Large Tilting", style: "tilt", tvMin: 37, tvMax: 95, capLbs: 180, vesaMinW: 200, vesaMinH: 200, vesaMaxW: 690, vesaMaxH: 415, depth: 2.2, ext: null, plateW: 30, plateH: 17.53, tilt: "+7/-10", swivel: null, list: 249.99 },
+  "S-CIXT1":   { model: "CIXT1-B1", name: "Extra Large Tilting", style: "tilt", tvMin: 40, tvMax: 110, capLbs: 300, vesaMinW: 200, vesaMinH: 200, vesaMaxW: 1100, vesaMaxH: 800, depth: 2.5, ext: null, plateW: 33.43, plateH: 17.53, plateWMax: 52.93, plateHMax: 32.49, tilt: "+7/-10", swivel: null, list: 299.99, note: "Extender brackets included — footprint grows to 52.93 x 32.49" },
+  "S-CILL2":   { model: "CILL2-B1", name: "Large Fixed", style: "fixed", tvMin: 37, tvMax: 90, capLbs: 150, vesaMinW: 100, vesaMinH: 100, vesaMaxW: 825, vesaMaxH: 500, depth: 0.55, ext: null, plateW: 35.26, plateH: 22.1, tilt: null, swivel: null, list: 199.99 },
+  "S-CILL1":   { model: "CILL1-B1", name: "Large Fixed", style: "fixed", tvMin: 37, tvMax: 95, capLbs: 180, vesaMinW: 200, vesaMinH: 200, vesaMaxW: 690, vesaMaxH: 415, depth: 1.6, ext: null, plateW: 30, plateH: 17.53, tilt: null, swivel: null, list: 199.99 },
 };
 
 const BASE_SANUS_STYLE_ORDER = {
@@ -309,10 +333,20 @@ const recommendBackBox = (tvSize, mountSystem, brand) => {
 // price-ordered ladder; prefers a model whose size AND VESA both fit, then
 // size-only (vesa flagged), then falls back to the XL tilt if nothing in
 // the style covers the size. Returns null when no catalog mount fits.
+// A panel must fall INSIDE the mount's pattern range. Checking only the max
+// let a Sony 42" (100x100) through on a CILT1 whose published minimum is
+// 200x200 — it will not bolt up without an adapter.
+const vesaFitsMount = (spec, m) => {
+  if (!spec || !m) return true;
+  const minW = m.vesaMinW ?? 0, minH = m.vesaMinH ?? 0;
+  return spec.w_mm >= minW && spec.h_mm >= minH &&
+         spec.w_mm <= m.vesaMaxW && spec.h_mm <= m.vesaMaxH;
+};
+
 const recommendSanusMount = (tvSize, style, brand) => {
   if (!tvSize) return null;
   const spec = VESA_DATA[brand]?.[tvSize] || null;
-  const vesaFits = (m) => !spec || (spec.w_mm <= m.vesaMaxW && spec.h_mm <= m.vesaMaxH);
+  const vesaFits = (m) => vesaFitsMount(spec, m);
   const sizeFits = (m) => tvSize >= m.tvMin && tvSize <= m.tvMax;
   const order = SANUS_STYLE_ORDER[style] || SANUS_STYLE_ORDER.fixed;
   let key = order.find(k => sizeFits(SANUS_MOUNTS[k]) && vesaFits(SANUS_MOUNTS[k]));
@@ -1118,21 +1152,24 @@ const TABLE_SCHEMAS = [
   },
   {
     id: "SANUS_MOUNTS", title: "Mounts", kind: "record", keyLabel: "SKU",
-    hint: "Sanus in-ceiling/in-wall mount ladder. Not spec-sheet verified.",
+    hint: "Sanus Black Series custom-install mounts, verified 2026-08-20 against SANUS Black Series literature. A panel's VESA pattern must fall INSIDE the min–max range — below the minimum it will not bolt up without an adapter.",
     cols: [
       S_("model", "Model"), S_("name", "Name"),
       { k: "style", label: "Style", t: "enum", options: ["fixed", "tilt", "fullmotion"] },
       N("tvMin", "TV min", "in"), N("tvMax", "TV max", "in"), N("capLbs", "Capacity", "lb"),
+      N("vesaMinW", "VESA min W", "mm"), N("vesaMinH", "VESA min H", "mm"),
       N("vesaMaxW", "VESA max W", "mm"), N("vesaMaxH", "VESA max H", "mm"),
       N("plateW", "Plate W", "in"), N("plateH", "Plate H", "in"),
       N("depth", "Depth", "in"), N("ext", "Extension", "in"), N("list", "List", "$"),
     ],
-    blank: { model: "NEW-1", name: "Custom mount", style: "fixed", tvMin: 40, tvMax: 85, capLbs: 150, vesaMaxW: 600, vesaMaxH: 400, plateW: 30, plateH: 18, depth: 1.5, ext: null, list: 0 },
+    blank: { model: "NEW-1", name: "Custom mount", style: "fixed", tvMin: 40, tvMax: 85, capLbs: 150, vesaMinW: 200, vesaMinH: 200, vesaMaxW: 600, vesaMaxH: 400, plateW: 30, plateH: 18, depth: 1.5, ext: null, list: 0 },
     validate: (row) => {
       const e = [];
       if (!(row.tvMax > row.tvMin)) e.push(["tvMax", "must exceed TV min"]);
       if (!(row.capLbs > 0)) e.push(["capLbs", "must be greater than 0"]);
       ["vesaMaxW", "vesaMaxH", "plateW", "plateH"].forEach(k => { if (!(row[k] > 0)) e.push([k, "must be greater than 0"]); });
+      if (row.vesaMinW > row.vesaMaxW) e.push(["vesaMinW", "minimum pattern exceeds the maximum"]);
+      if (row.vesaMinH > row.vesaMaxH) e.push(["vesaMinH", "minimum pattern exceeds the maximum"]);
       return e;
     },
   },
@@ -1477,6 +1514,48 @@ const runSelfTests = () => {
   })());
   T("studBay", "every box carries a bracket and a sane size range", (() => (
     Object.values(BASE_BACK_BOXES).every(b => !!b.bracket && b.tvMin > 0 && b.tvMax > b.tvMin)
+  ))());
+
+  // ---- Sanus mount data (pins the 2026-08-20 spec-sheet audit) ----
+  T("mounts", "every mount declares a VESA range, min <= max", (() => (
+    Object.values(BASE_SANUS_MOUNTS).every(m =>
+      m.vesaMinW > 0 && m.vesaMinH > 0 && m.vesaMinW <= m.vesaMaxW && m.vesaMinH <= m.vesaMaxH)
+  ))());
+  T("mounts", "a panel below the mount's minimum pattern is rejected", (() => {
+    const cilt1 = BASE_SANUS_MOUNTS["S-CILT1"];               // published min 200x200
+    const small = { w_mm: 100, h_mm: 100 };                   // e.g. Sony 42"
+    const ok = { w_mm: 300, h_mm: 300 };
+    const huge = { w_mm: 800, h_mm: 500 };
+    return !vesaFitsMount(small, cilt1) && vesaFitsMount(ok, cilt1) && !vesaFitsMount(huge, cilt1);
+  })());
+  T("mounts", "the Sony 42 / CILT1 false positive is closed", (() => {
+    const spec = VESA_DATA.Sony[42];
+    return spec.w_mm === 100 && !vesaFitsMount(spec, BASE_SANUS_MOUNTS["S-CILT1"]) &&
+           vesaFitsMount(spec, BASE_SANUS_MOUNTS["S-CILL2"]);   // CILL2 min is 100x100, so it does fit
+  })());
+  T("mounts", "CILT1 matches the published spec block", (() => {
+    const m = BASE_SANUS_MOUNTS["S-CILT1"];
+    return m.model === "CILT1-B1" && m.tvMin === 37 && m.tvMax === 95 && m.capLbs === 180 &&
+           m.vesaMinW === 200 && m.vesaMaxW === 690 && m.vesaMaxH === 415 &&
+           approx(m.depth, 2.2, 1e-9) && approx(m.plateW, 30, 1e-9) && approx(m.plateH, 17.53, 1e-9);
+  })());
+  T("mounts", "CILF230 matches the published spec block (and is the -G1 SKU)", (() => {
+    const m = BASE_SANUS_MOUNTS["S-CILF230"];
+    return m.model === "CILF230-G1" && m.tvMin === 46 && m.tvMax === 95 && m.capLbs === 175 &&
+           m.vesaMaxW === 600 && m.vesaMaxH === 400 && approx(m.ext, 30, 1e-9) &&
+           approx(m.plateW, 36.73, 1e-9) && approx(m.plateH, 22.03, 1e-9);
+  })());
+  T("mounts", "no unsourced swivel figures ship", (() => (
+    Object.values(BASE_SANUS_MOUNTS).every(m => m.swivel == null)   // SANUS does not publish swivel for this line
+  ))());
+  T("mounts", "CIXT1 carries its extended footprint", (() => {
+    const m = BASE_SANUS_MOUNTS["S-CIXT1"];
+    return m.plateWMax > m.plateW && m.plateHMax > m.plateH &&
+           approx(m.plateWMax, 52.93, 1e-9) && approx(m.plateHMax, 32.49, 1e-9);
+  })());
+  T("mounts", "every style ladder entry is a real mount of that style", (() => (
+    Object.entries(BASE_SANUS_STYLE_ORDER).every(([style, keys]) =>
+      keys.length > 0 && keys.every(k => BASE_SANUS_MOUNTS[k] && BASE_SANUS_MOUNTS[k].style === style))
   ))());
 
   // ---- reference underlay: calibration + markup ----
@@ -3002,7 +3081,7 @@ export default function App() {
     return {
       key: sanusMountModel, ...m,
       sizeOk: !selectedSize || (selectedSize >= m.tvMin && selectedSize <= m.tvMax),
-      vesaOk: !spec || (spec.w_mm <= m.vesaMaxW && spec.h_mm <= m.vesaMaxH),
+      vesaOk: vesaFitsMount(spec, m),
       styleFallback: false,
     };
   }, [mountSystem, sanusMountModel, recommendedMount, selectedSize, brand, catalogRev]);
@@ -3777,7 +3856,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
                 <div style={{ fontWeight: 600 }}>Sanus Black {sanusMount.model}</div>
                 <div>{sanusMount.name} · {sanusMount.tvMin}"–{sanusMount.tvMax}" · {sanusMount.capLbs} lbs</div>
                 <div style={{ fontSize: 10, opacity: 0.8, marginTop: 3 }}>
-                  VESA to {sanusMount.vesaMaxW}×{sanusMount.vesaMaxH} · plate {sanusMount.plateW}" × {sanusMount.plateH}"{sanusMount.tilt ? ` · tilt ${sanusMount.tilt}°` : ""}{sanusMount.swivel ? ` · swivel ${sanusMount.swivel}°` : ""}
+                  VESA {sanusMount.vesaMinW ?? "?"}×{sanusMount.vesaMinH ?? "?"}–{sanusMount.vesaMaxW}×{sanusMount.vesaMaxH} · plate {sanusMount.plateW}{sanusMount.plateWMax ? `–${sanusMount.plateWMax}` : ""}" × {sanusMount.plateH}{sanusMount.plateHMax ? `–${sanusMount.plateHMax}` : ""}"{sanusMount.tilt ? ` · tilt ${sanusMount.tilt}°` : ""}{sanusMount.swivel ? ` · swivel ${sanusMount.swivel}°` : ""}
                 </div>
                 <div style={{ fontSize: 11, marginTop: 4, color: "var(--acc)" }}>
                   DEPTH {fmt(sanusMount.depth)} off wall{sanusMount.ext ? ` — extends to ${fmt(sanusMount.ext)}` : ""}
@@ -3801,7 +3880,14 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
               <div className="warn-box"><div className="warn-title">SIZE OUT OF RANGE</div>{sanusMount.model} is rated {sanusMount.tvMin}"–{sanusMount.tvMax}" — selected {selectedSize}".</div>
             )}
             {selectedSize && sanusMount && !sanusMount.vesaOk && vesaSpec && (
-              <div className="note-box"><strong>VESA check:</strong> TV pattern {vesaSpec.w_mm}×{vesaSpec.h_mm} exceeds {sanusMount.model} max {sanusMount.vesaMaxW}×{sanusMount.vesaMaxH}.</div>
+              (vesaSpec.w_mm < (sanusMount.vesaMinW ?? 0) || vesaSpec.h_mm < (sanusMount.vesaMinH ?? 0)) ? (
+                <div className="warn-box">
+                  <div className="warn-title">VESA BELOW MOUNT MINIMUM</div>
+                  TV pattern {vesaSpec.w_mm}×{vesaSpec.h_mm} is smaller than {sanusMount.model}&apos;s minimum {sanusMount.vesaMinW}×{sanusMount.vesaMinH}. It will not bolt up without an adapter plate.
+                </div>
+              ) : (
+                <div className="note-box"><strong>VESA check:</strong> TV pattern {vesaSpec.w_mm}×{vesaSpec.h_mm} exceeds {sanusMount.model} max {sanusMount.vesaMaxW}×{sanusMount.vesaMaxH}.</div>
+              )
             )}
             {selectedSize && sanusMount && effWeightLbs > 0 && effWeightLbs > sanusMount.capLbs && (
               <div className="warn-box"><div className="warn-title">OVER WEIGHT RATING</div>TV {effWeightLbs} lbs{tvWeightLbs > 0 ? "" : " (from spec sheet)"} exceeds {sanusMount.model} capacity of {sanusMount.capLbs} lbs.</div>

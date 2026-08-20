@@ -52,7 +52,7 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 
 ## Acceptance checks — do not publish if any fail
 
-- Status-bar badge reads **✓ 92/92** (embedded self-tests; if red the math is
+- Status-bar badge reads **✓ 100/100** (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
 - In the diagnostics panel, run **SWEEP** → **0 failing / ~95 configs**
   (label-collision audit).
@@ -188,6 +188,32 @@ callouts, which is the whole point of where they sit.
 
 - Open DATA, change a back box width, close: the drawing must repaint. Reload:
   the change must persist. RESET ALL: it must return to the shipped value.
+
+## Sanus mount data
+
+- **Verified 2026-08-20** against SANUS's own Black Series literature
+  (`sanus.com/assets/literature/pdf/SANBLK0919_web.pdf`). Unlike the back boxes,
+  all seven models were already correct — nothing was transposed. Do not
+  "correct" these from a retailer page; one listed CILL1 as VESA 600x400 when
+  SANUS publishes 690x415, and another listed CILT1 as 37"-90" when the
+  literature says 37"-95".
+- `plateW`/`plateH` are the PRODUCT dimensions (the mount's physical extent,
+  which is what the elevation draws). SANUS also prints a separate wall-plate
+  drawing — do not mix the two.
+- `depth` is the spec-block DEPTH, which differs slightly from the
+  product-dimension depth on some models (CILT1 2.2 vs 2.18, CIXT1 2.5 vs 2.41).
+  The DEPTH field is what SANUS quotes, so it is what we use.
+- `list` is LIST PRICE, not MSRP.
+- **`vesaMin` is not decoration.** A panel below the mount's minimum pattern
+  will not bolt up without an adapter. Checking only the max passed a Sony 42"
+  (100x100) on a CILT1 whose minimum is 200x200. `vesaFitsMount()` is the single
+  predicate for both the recommender and the manual picker — keep it that way so
+  they cannot diverge.
+- **SANUS publishes no swivel figure for this line.** Two invented values (55
+  and 49) were removed rather than shipped; a self-test now asserts no mount
+  carries one. If you find an official figure, cite it in the comment.
+- CIXT1 ships with extender brackets, so its footprint is a RANGE —
+  `plateWMax`/`plateHMax` carry the extended size (52.93 x 32.49).
 
 ## Back box data
 
