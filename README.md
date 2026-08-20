@@ -168,8 +168,9 @@ The app self-tests on every load. The badge in the status bar is the contract:
 - **SWEEP** in the diagnostics panel — 103 hostile configurations checked for
   label collisions, including runs at the largest text size. Must read
   `0 failing`.
-- **Render audit** — measures every text bounding box for overlaps and
-  clipping. Must read `0 overlaps · 0 clipped`.
+- **Render audit** — every text bounding box checked for overlaps, clipping,
+  and for sitting on linework without a backing plate. Must read
+  `0 overlaps · 0 clipped · 0 unbacked`.
 
 Golden test constants are hand-derived, not pasted from output. If a catalog
 change makes one fail, re-derive it — the arithmetic is in the inline comments.

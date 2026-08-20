@@ -185,7 +185,13 @@ is too narrow to hold both side by side.
    `elements.splice(labelStart, 0, ...inkEls)` puts redlines above the geometry
    but under every dimension, so a scribble can never strike through a number
    the installer has to read. Geometry (wall, TV, box) still sits under markup.
-3. **Every label gets an opaque backing plate.** `120.0" WALL` and `108.0" H`
+3. **Every label gets an opaque backing plate — sized to the WIDEST line it
+   covers, not the first one.** A callout pill's coloured rect only ever spanned
+   line 1, so every sub-line ("SnapAV Strong", "15-1/8\" ABV TV BTM") sat as
+   bare text on top of wall edges and the TV outline. `pushPill` now draws a
+   full-height plate first and the coloured pill over its first line. Likewise
+   the mount-height plate was sized on the value text, so a longer "TO CENTER"
+   sub-label hung off its left edge. `120.0" WALL` and `108.0" H`
    had none; the mount-height plate stopped short of its "TO CENTER" sub-label;
    markup text and measure labels had none at all. All fixed — if you add a new
    label, give it a plate.

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.3.0";
+const APP_VERSION = "2.3.1";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -2183,9 +2183,21 @@ const buildSchematic = (S, BASE_P) => {
   }
 
   // pill helper — filled (screen) or outlined (print)
+  //
+  // Two plates, not one. The coloured pill only ever covered the FIRST line, so
+  // every sub-line ("SnapAV Strong", "15-1/8\" ABV TV BTM", "VERTICALS FROM
+  // LEFT WALL") sat as bare text on top of whatever the drawing had there — a
+  // wall edge, the TV outline, the grid — and became hard to read. An opaque
+  // plate now spans the WHOLE callout, with the coloured pill drawn over its
+  // first line. Height matches packRail's, so the rail still packs correctly.
   const pushPill = (key, x, y, lines, color) => {
     const w = Math.max(...lines.map(l => textW(l.text, FS(l.size)))) + 14;
     const filled = P.pillStyle === "filled";
+    const fullH = 16 * TS + (lines.length - 1) * 13 * TS;
+    if (lines.length > 1) {
+      elements.push(<rect key={K(`${key}-plate`)} x={x} y={y - 12 * TS} width={w} height={fullH} rx="2"
+        fill={P.halo} stroke="none"/>);
+    }
     elements.push(<rect key={K(`${key}-bg`)} x={x} y={y - 12 * TS} width={w} height={16 * TS} rx="2"
       fill={filled ? color : P.canvas} stroke={filled ? P.canvas : color} strokeWidth={filled ? 0.8 : 1.1}/>);
     lines.forEach((l, i) => {
@@ -2359,7 +2371,7 @@ const buildSchematic = (S, BASE_P) => {
     elements.push(<line key={K("dha")} x1={dimX - 4} y1={floorY} x2={dimX + 4} y2={floorY} stroke={P.line} strokeWidth={P.dimW}/>);
     elements.push(<line key={K("dhb")} x1={dimX - 4} y1={refY} x2={dimX + 4} y2={refY} stroke={P.line} strokeWidth={P.dimW}/>);
     const dhMidY = (floorY + refY) / 2;
-    const dhW = textW(leftDimText, FS(13)) + 8;
+    const dhW = Math.max(textW(leftDimText, FS(13)), textW(refLabel, FS(8))) + 8;   // plate must cover BOTH lines
     elements.push(<rect key={K("dhbg")} x={dimX - 8 - dhW} y={dhMidY - FS(12)} width={dhW + 4} height={FS(35)} fill={P.halo} stroke="none" rx="2"/>);
     elements.push(<text key={K("dht")} x={dimX - 8} y={dhMidY + FS(4)} textAnchor="end" fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{leftDimText}</text>);
     elements.push(<text key={K("dhl")} x={dimX - 8} y={dhMidY + FS(19)} textAnchor="end" fill={P.dimSub} fontSize={FS(8)} fontFamily="'IBM Plex Mono', monospace" letterSpacing="1">{refLabel}</text>);
@@ -2434,7 +2446,7 @@ const buildSchematic = (S, BASE_P) => {
   elements.push(<line key={K("wwb")} x1={wallX + wallPxW} y1={wdY - 4} x2={wallX + wallPxW} y2={wdY + 4} stroke={P.line} strokeWidth={P.dimW}/>);
   const wwTxt = `${fmtIn(safeWallW, dispUnits)} WALL`;
   const wwW = textW(wwTxt, FS(13)) + 10;
-  elements.push(<rect key={K("wwbg")} x={wallX + wallPxW / 2 - wwW / 2} y={wdY + 4} width={wwW} height={FS(17)} rx="2" fill={P.halo} stroke="none"/>);
+  elements.push(<rect key={K("wwbg")} x={wallX + wallPxW / 2 - wwW / 2} y={wdY + 2} width={wwW} height={FS(19)} rx="2" fill={P.halo} stroke="none"/>);
   elements.push(<text key={K("wwt")} x={wallX + wallPxW / 2} y={wdY + FS(16)} textAnchor="middle" fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{wwTxt}</text>);
 
   // wall height (right, lane-aware)
@@ -2444,7 +2456,7 @@ const buildSchematic = (S, BASE_P) => {
   elements.push(<line key={K("whb")} x1={whX - 4} y1={floorY} x2={whX + 4} y2={floorY} stroke={P.line} strokeWidth={P.dimW}/>);
   const whTxt = `${fmtIn(safeWallH, dispUnits)} H`;
   const whW = textW(whTxt, FS(13)) + 10;
-  elements.push(<rect key={K("whbg")} x={whX + 4} y={(wallY + floorY) / 2 - FS(8)} width={whW} height={FS(17)} rx="2" fill={P.halo} stroke="none"/>);
+  elements.push(<rect key={K("whbg")} x={whX + 4} y={(wallY + floorY) / 2 - FS(10)} width={whW} height={FS(19)} rx="2" fill={P.halo} stroke="none"/>);
   elements.push(<text key={K("wht")} x={whX + 8} y={(wallY + floorY) / 2 + FS(4)} fill={P.dimText} fontSize={FS(13)} fontWeight="600" fontFamily="'IBM Plex Mono', monospace">{whTxt}</text>);
 
   // Hand markup goes ABOVE the geometry but BELOW the annotation layer, so a
@@ -2996,7 +3008,7 @@ export default function App() {
   const [viewportW, setViewportW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
   const [activePanel, setActivePanel] = useState("drawing");
   const [showDiag, setShowDiag] = useState(false);
-  const [renderAudit, setRenderAudit] = useState({ overlaps: 0, clipped: 0, checked: 0 });
+  const [renderAudit, setRenderAudit] = useState({ overlaps: 0, clipped: 0, unbacked: 0, checked: 0 });
   const [importSummary, setImportSummary] = useState(null);
   const [sweep, setSweep] = useState(null);
   const [showExport, setShowExport] = useState(false);
@@ -3171,11 +3183,24 @@ export default function App() {
   const printRef = useRef(null);
   const fileRef = useRef(null);
 
-  // render audit: measure every real text bbox; overlaps/out-of-bounds → flag
+  // Render audit: every real text bbox is measured for overlaps, clipping, and
+  // — since v2.3.1 — whether a label that sits on top of drawing linework has an
+  // opaque plate behind it. Bare text over a wall edge or the TV outline is
+  // legible on screen at a glance and awful on a printed sheet, which is how the
+  // callout sub-lines shipped unbacked for so long.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const id = setTimeout(() => {
+    let dead = false;
+    // Wait for the web font before measuring. Measuring at a fixed delay can
+    // land before IBM Plex Mono swaps in, and every bbox is then wrong — which
+    // shows up as phantom findings that vanish when you look for them.
+    const ready = (typeof document !== "undefined" && document.fonts && document.fonts.ready)
+      ? document.fonts.ready : Promise.resolve();
+    let id = null;
+    ready.then(() => {
+      if (dead) return;
+      id = setTimeout(() => {
       try {
         const texts = Array.from(svg.querySelectorAll("text"));
         const rects = texts.map(t => { const b = t.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
@@ -3188,11 +3213,38 @@ export default function App() {
             if (r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h) overlaps++;
           }
         });
-        setRenderAudit({ overlaps, clipped, checked: rects.length });
-        if (overlaps || clipped) console.warn(`[render audit] ${overlaps} overlaps, ${clipped} clipped labels`);
+
+        // opaque backing plates available to cover a label
+        // NB: skip <defs> — the grid pattern lives there and is never painted,
+        // but its path still reports a bbox and would flag the corner titles.
+        const inDefs = (el) => !!el.closest("defs");
+        const plates = Array.from(svg.querySelectorAll("rect, polygon")).filter(el => {
+          if (inDefs(el)) return false;
+          const f = (el.getAttribute("fill") || "").toLowerCase();
+          const fo = el.getAttribute("fill-opacity");
+          return f && f !== "none" && f.indexOf("url(") < 0 && (fo === null || +fo > 0.8)
+                 && el.getAttribute("width") !== "100%";
+        }).map(el => { const b = el.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+        // linework a label could end up sitting on
+        const strokes = Array.from(svg.querySelectorAll("line, polyline, path")).filter(el => !inDefs(el)).map(el => {
+          const b = el.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height };
+        });
+        let unbacked = 0;
+        const unbackedWho = [];
+        rects.forEach((r, i) => {
+          const covered = plates.some(o => r.x >= o.x - 1.5 && r.y >= o.y - 1.5 &&
+                                           r.x + r.w <= o.x + o.w + 1.5 && r.y + r.h <= o.y + o.h + 1.5);
+          if (covered) return;
+          const onLinework = strokes.some(l => r.x < l.x + l.w && l.x < r.x + r.w && r.y < l.y + l.h && l.y < r.y + r.h);
+          if (onLinework) { unbacked++; unbackedWho.push(texts[i].textContent); }   // margin titles sit on nothing
+        });
+
+        setRenderAudit({ overlaps, clipped, unbacked, checked: rects.length });
+        if (overlaps || clipped || unbacked) console.warn(`[render audit] ${overlaps} overlaps, ${clipped} clipped, ${unbacked} unbacked${unbackedWho.length ? ` → ${unbackedWho.join(" | ")}` : ""}`);
       } catch { /* getBBox unavailable mid-layout — skip this pass */ }
-    }, 150);
-    return () => clearTimeout(id);
+      }, 150);
+    });
+    return () => { dead = true; if (id) clearTimeout(id); };
   }, [screenSchem]);
 
   // ----- reference underlay: import, calibrate, annotate -----------------
@@ -3756,7 +3808,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   };
 
   const allTestsPass = selfTest.passed === selfTest.total;
-  const auditClean = renderAudit.overlaps === 0 && renderAudit.clipped === 0;
+  const auditClean = renderAudit.overlaps === 0 && renderAudit.clipped === 0 && !renderAudit.unbacked;
 
   // ----- shared UI fragments -----
   const setupPanel = (
@@ -4219,7 +4271,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
           <button className="chip" onClick={() => setShowDiag(false)}>CLOSE</button>
         </div>
       </div>
-      <div className="diag-row head-row"><span>Render audit</span><span className={auditClean ? "p" : "f"}>{renderAudit.overlaps} overlaps · {renderAudit.clipped} clipped · {renderAudit.checked} labels</span></div>
+      <div className="diag-row head-row"><span>Render audit</span><span className={auditClean ? "p" : "f"}>{renderAudit.overlaps} overlaps · {renderAudit.clipped} clipped · {renderAudit.unbacked || 0} unbacked · {renderAudit.checked} labels</span></div>
       {sweep && (
         <>
           <div className="diag-row head-row"><span>Stress sweep</span><span className={sweep.failures.length === 0 ? "p" : "f"}>{sweep.failures.length} failing / {sweep.total} configs</span></div>
