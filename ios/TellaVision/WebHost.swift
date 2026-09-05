@@ -64,6 +64,7 @@ struct WebHost: UIViewRepresentable {
         if #available(iOS 16.4, *) { web.isInspectable = true }
         #endif
         context.coordinator.web = web
+        web.navigationDelegate = context.coordinator
         web.load(URLRequest(url: URL(string: kOrigin + "index.html")!))
         return web
     }
@@ -71,9 +72,30 @@ struct WebHost: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
     // MARK: - export bridge
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         weak var web: WKWebView?
         private var pdfWeb: WKWebView?          // retained while rendering
+
+        // DEBUG-only launch sanity check. The export bridge failing is silent by
+        // nature — a[download] simply does nothing — so confirm at startup that
+        // the page can see the handler and that the engine self-tests passed.
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            #if DEBUG
+            let probe = """
+            JSON.stringify({
+              bridge: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tvExport),
+              tests: (document.querySelector('.diag-badge')||{}).textContent || null,
+              react: window.React ? window.React.version : null,
+              origin: location.origin
+            })
+            """
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                webView.evaluateJavaScript(probe) { value, error in
+                    NSLog("[TellaVision] startup check: %@", (value as? String) ?? "error: \(String(describing: error))")
+                }
+            }
+            #endif
+        }
 
         func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "tvExport",

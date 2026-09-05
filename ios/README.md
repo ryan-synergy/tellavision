@@ -14,21 +14,47 @@ drawing code are shared verbatim with the browser build — there is no fork.
      free **D-U-N-S number**. Apple's lookup can take a few days to a couple of
      weeks. **Start this first — it gates everything else.**
 
-## Creating the project
+## Building
 
-Xcode → New Project → iOS → App
-- Product Name `TellaVision`, Interface **SwiftUI**, Language **Swift**
-- Bundle identifier e.g. `com.synergyav.tellavision`
-- Delete the generated `ContentView.swift`
+The project already exists — just open it:
 
-Then add from this folder:
-- `TellaVision/TellaVisionApp.swift` (replaces the generated one)
-- `TellaVision/WebHost.swift`
-- `TellaVision/PrivacyInfo.xcprivacy`
-- `TellaVision/Assets/AppIcon-1024.png` → drop into the asset catalog's AppIcon slot
+```bash
+open ios/TellaVision.xcodeproj
+```
 
-Set the Info.plist keys listed in `INFO-PLIST-KEYS.md`, and add the run-script
-phase from `BUILD-NOTES.md` so the web bundle is staged into the app.
+Or from the command line:
+
+```bash
+xcodebuild -project ios/TellaVision.xcodeproj -target TellaVision \
+  -configuration Debug -sdk iphonesimulator -arch arm64 \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+Bundle id `com.synergyav.tellavision`, deployment target iOS 16, universal
+(iPhone + iPad). Info.plist keys are set as build settings (`INFOPLIST_KEY_*`)
+so there is no separate plist to maintain.
+
+**Verified on an iPad Pro 13-inch simulator, 2026-09-04.** A DEBUG-only startup
+check logs a self-diagnosis; it read:
+
+```
+{"bridge":true,"tests":"✓ 100/100","react":"18.3.1","origin":"tellavision://app"}
+```
+
+- `bridge: true` — the page can reach the native export handler
+- `tests` — the full engine self-test suite passes inside the app
+- `origin` — a real origin, not `file://`, so localStorage and IndexedDB persist
+
+## Re-staging the web bundle
+
+`TellaVision/web/` is a folder reference — the whole directory is copied into the
+app verbatim, which is what keeps `vendor/` resolvable by the scheme handler.
+After rebuilding `index.html`, re-stage it:
+
+```bash
+cd ios && cp ../index.html ../sw.js ../favicon.png ../apple-touch-icon.png TellaVision/web/ \
+  && cp ../vendor/*.js TellaVision/web/vendor/
+```
 
 ## How it works
 
