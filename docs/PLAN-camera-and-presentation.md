@@ -132,7 +132,10 @@ does both jobs.
    implies somewhere to put four of them.
 3. **AR tape-out** — project the layout onto the real wall at install time.
 
-## Parked
+## Built in v3.4.0 — traced obstructions as real constraints
+
+(Was parked. Promoted once photos carried true scale AND a true datum, which is
+what turns a traced box into a measurement.)
 
 **Traced obstructions as real constraints.** Today anything traced from a photo
 is decoration; the engine cannot see it. In a finished home the real constraint
@@ -286,3 +289,37 @@ Verified two ways: the maths is pinned exactly (door foot 0", head 80", a point
 - Horizontal position is still a drag. It matters far less — the centreline is
   usually "centre it" — and there is no equivalent free datum.
 - Document model, AR tape-out, traced obstructions as constraints.
+
+
+---
+
+## Built — v3.4.0 (obstructions)
+
+The `OBSTRUCTION` tool draws a box like any other, but it is the one markup type
+the engine reads: `obstructionsFrom` turns it into a rectangle in wall inches,
+`computeRecommendedCenterH` lifts the panel to clear it, and
+`obstructionIssues` reports when placement is too close. Per-obstruction
+clearance and name, 3" default.
+
+Two things the tests caught:
+
+**The first "is it below the TV?" rule was wrong.** It ignored any obstruction
+whose top sat above the proposed panel CENTRE — but a 52" shelf under a TV
+centred at 42" means the panel passes straight through it, which is exactly when
+it should lift. The rule is now: ignore it only if it sits entirely above the
+proposed panel. Crown mouldings still constrain downward instead.
+
+**The sweep was computing a different height from the app.** It called
+`computeRecommendedCenterH` without obstructions, so the four new obstruction
+configs would have swept a layout no user would ever see. `tvCL` had to be
+hoisted above the recommendation in both the app and the sweep, since the
+recommendation now needs to know which traced boxes actually sit under the
+panel.
+
+Honest limit, surfaced in the UI: on a photo with no datum set, traced positions
+are approximate, and the panel says so rather than implying otherwise.
+
+### Still open
+
+- Horizontal position of a photo is still a drag.
+- Document model (a job holds several walls), AR tape-out.

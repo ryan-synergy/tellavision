@@ -112,6 +112,18 @@ stay with the job on the device but are never exported: **the printed sheet
 always prints empty boxes**, because the person holding the tape ticks them with
 a pen.
 
+**Trace what is actually in the way.** The **OBSTRUCTION** tool boxes a shelf,
+cabinet top, crown or sconce — and unlike every other markup, **the engine reads
+it**. The recommended mount height lifts to clear it, and the placement warnings
+say when you are too close. Name each one and give it its own clearance
+(3" default); the drawing shows the keep-out band above it.
+
+This is the point of the camera work. In a finished home the real constraint is
+rarely a parametric fireplace — it is whatever is on that wall. A box traced on
+a squared, height-pinned photo is a measurement, so tracing now feeds the
+recommendation instead of annotating it. On a photo with no datum set the panel
+says the positions are approximate.
+
 **One measurement pins the photo.** Squaring a photo fixes its **scale** —
 both reference dimensions are known, so inches-per-pixel is solved. It does not
 fix its **position**: nothing in a photograph says how high off the floor

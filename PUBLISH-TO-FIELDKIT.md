@@ -65,7 +65,7 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - No CDN: `grep -c unpkg index.html` must be **0**. React and pdf.js are
   vendored in `vendor/`; the app must run with the network off. (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
-- In the diagnostics panel, run **SWEEP** → **0 failing / 130 configs**
+- In the diagnostics panel, run **SWEEP** → **0 failing / 134 configs**
   (label-collision audit — includes L and XL type runs).
 - Render audit reads **0 overlaps · 0 clipped · 0 unbacked** in all three
   themes (it audits the ACTIVE theme, so switch and re-read).
@@ -85,6 +85,9 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - After squaring up against a door, the height prompt pre-fills **0** and the
   photo snaps so the door stands on the drawn floor line. Re-open
   `PDF ▾ → SET THE HEIGHT`, enter 6, and the photo moves exactly 6" up.
+- Draw an **OBSTRUCTION** box across the wall below the TV: the recommended
+  centre height must jump to clear its top by the stated clearance, and raising
+  that clearance must raise the TV by the same amount.
 - Switch to the **Client** view: the drawing must contain the photo and a
   rendered TV and NOTHING else — no grid, outline, dimensions, title block or
   parametric fireplace. EXPORT → PDF from that view is a single page with no

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "3.3.0";
+const APP_VERSION = "3.4.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -241,7 +241,7 @@ const ABBREVIATIONS = [
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Gap between TV bottom edge and mantel top / firebox opening top, in inches.
-const BASE_CLEARANCE = { mantel: 8, noMantel: 10 };
+const BASE_CLEARANCE = { mantel: 8, noMantel: 10, obstruction: 3 };
 
 // 16:9 panel + ~1.2" bezel allowance. Constants are 16/sqrt(337), 9/sqrt(337).
 const BASE_FORMULA = { wCoef: 0.872, hCoef: 0.490, bezel: 1.2 };
@@ -394,14 +394,79 @@ const fmtIn = (v, mode = "dec") => {
 const computeTvCL = ({ wallW, hasFireplace, fbOffsetIn, tvOffsetIn }) =>
   wallW / 2 + (hasFireplace ? fbOffsetIn : 0) + tvOffsetIn;
 
-const computeRecommendedCenterH = ({ selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist }) => {
+// ── Traced obstructions ──────────────────────────────────────────────────────
+// Everything else drawn over a photo is decoration the engine cannot see. In a
+// finished home the real constraint is rarely a parametric fireplace — it is
+// the floating shelf, the cabinet top, the crown, the window head that is
+// actually there. An obstruction is the one kind of markup the engine reads, so
+// tracing feeds the recommendation instead of annotating it.
+//
+// This only became honest once photos carried true scale AND a true datum: a box
+// traced on a squared, height-pinned photo is a measurement. On an un-pinned one
+// it is a sketch, and the UI says so.
+const obstructionsFrom = (markup) => (markup || [])
+  .filter(m => m && m.type === "obst" && m.pts && m.pts.length >= 2)
+  .map((m, i) => {
+    const a = m.pts[0], b = m.pts[m.pts.length - 1];
+    const clear = (typeof m.clear === "number" && isFinite(m.clear) && m.clear >= 0) ? m.clear : CLEARANCE.obstruction;
+    return {
+      id: m.id != null ? m.id : `o${i}`,
+      label: (m.text && String(m.text).trim()) || "obstruction",
+      x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x),
+      y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y),   // AFF, y1 is the top
+      clear,
+    };
+  })
+  .filter(o => o.x1 - o.x0 > 0.5 && o.y1 - o.y0 > 0.5);
+
+const obstructionOverlapsX = (o, left, right) => o.x1 > left && o.x0 < right;
+
+// Advisory strings, in the same style as computePlacementIssues. Nothing is ever
+// clamped — the app reports, the installer decides.
+const obstructionIssues = (layout, obs) => {
+  const out = [];
+  if (!layout || !obs || !obs.length) return out;
+  obs.forEach(o => {
+    if (!obstructionOverlapsX(o, layout.tvLeft, layout.tvRight)) return;
+    const hitsBody = o.y1 > layout.tvBottom && o.y0 < layout.tvTop;
+    if (hitsBody) { out.push(`TV overlaps ${o.label}`); return; }
+    if (o.y1 <= layout.tvBottom) {
+      const gap = layout.tvBottom - o.y1;
+      if (gap < o.clear - 0.005) out.push(`Only ${gap.toFixed(1)}" above ${o.label} — ${o.clear.toFixed(1)}" wanted`);
+    } else {
+      const gap = o.y0 - layout.tvTop;
+      if (gap < o.clear - 0.005) out.push(`Only ${gap.toFixed(1)}" below ${o.label} — ${o.clear.toFixed(1)}" wanted`);
+    }
+  });
+  return out;
+};
+
+const computeRecommendedCenterH = ({ selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, obstructions, tvCL }) => {
   if (!selectedSize) return 42;
-  const { h: tvH } = tvDimsFor(brand, selectedSize);
-  if (hasFireplace && hasMantel) return mantelH + CLEARANCE.mantel + tvH / 2;
-  if (hasFireplace && !hasMantel) return fbOpeningH + CLEARANCE.noMantel + tvH / 2;
-  let base = 42;
-  if (useViewDist && viewDist > 144) base = 44;
-  if (useViewDist && viewDist > 192) base = 46;
+  const { w: tvW, h: tvH } = tvDimsFor(brand, selectedSize);
+  let base;
+  if (hasFireplace && hasMantel) base = mantelH + CLEARANCE.mantel + tvH / 2;
+  else if (hasFireplace && !hasMantel) base = fbOpeningH + CLEARANCE.noMantel + tvH / 2;
+  else {
+    base = 42;
+    if (useViewDist && viewDist > 144) base = 44;
+    if (useViewDist && viewDist > 192) base = 46;
+  }
+  // Anything traced below the panel raises the floor under it. Tested against
+  // the ORIGINAL base, not the running value, so one obstruction lifting the TV
+  // cannot reclassify another from "below" to "above" mid-loop.
+  const obs = obstructions || [];
+  if (obs.length && tvCL != null) {
+    const left = tvCL - tvW / 2, right = tvCL + tvW / 2;
+    obs.forEach(o => {
+      if (!obstructionOverlapsX(o, left, right)) return;
+      // Ignore it only if it sits entirely ABOVE the proposed panel — a crown, a
+      // ceiling fixture. Anything else is something to hang clear of, including
+      // one the default height would put the TV straight through.
+      if (o.y0 >= base + tvH / 2) return;
+      base = Math.max(base, o.y1 + o.clear + tvH / 2);
+    });
+  }
   return base;
 };
 
@@ -1036,10 +1101,10 @@ const calibrateToBox = (u, box, realW, target) => {
 
 // --- markup layer --------------------------------------------------------
 // Every point is stored in wall inches for the same reason as the underlay.
-const MARKUP_TOOLS = ["select", "mask", "pen", "line", "arrow", "rect", "text", "measure"];
+const MARKUP_TOOLS = ["select", "mask", "pen", "line", "arrow", "rect", "obst", "text", "measure"];
 const MARKUP_COLORS = ["#FF3B30", "#FFB000", "#00D68F", "#4A9EFF", "#FFFFFF", "#111111"];
 const MARKUP_WIDTHS = [1, 2, 3.5];
-const TOOL_LABEL = { move: "MOVE", select: "SELECT", mask: "BLANK", pen: "PEN", line: "LINE", arrow: "ARROW", rect: "BOX", text: "TEXT", measure: "MEASURE" };
+const TOOL_LABEL = { move: "MOVE", select: "SELECT", mask: "BLANK", pen: "PEN", line: "LINE", arrow: "ARROW", rect: "BOX", obst: "OBSTRUCTION", text: "TEXT", measure: "MEASURE" };
 
 // --- markup colour: fixed swatches, plus one that follows the paper --------
 // "auto" is a SENTINEL, not a colour. It resolves at RENDER time to whatever
@@ -1193,12 +1258,12 @@ const hitMarkup = (items, q, tol) => {
 const handlesFor = (m) => {
   if (!m || !m.pts || !m.pts.length) return [];
   if (m.type === "text" || m.type === "pen") return [];
-  if (m.type === "rect" || m.type === "mask") return rectCorners(m.pts[0], m.pts[m.pts.length - 1]).map((p, i) => ({ ...p, ix: i }));
+  if (m.type === "rect" || m.type === "mask" || m.type === "obst") return rectCorners(m.pts[0], m.pts[m.pts.length - 1]).map((p, i) => ({ ...p, ix: i }));
   return m.pts.map((p, i) => ({ ...p, ix: i }));
 };
 
 const moveHandle = (m, ix, q) => {
-  if (m.type === "rect" || m.type === "mask") {
+  if (m.type === "rect" || m.type === "mask" || m.type === "obst") {
     const a = { ...m.pts[0] }, b = { ...m.pts[m.pts.length - 1] };
     // corners run clockwise from top-left of the normalised box
     if (ix === 0) { a.x = q.x; a.y = q.y; }
@@ -2495,6 +2560,59 @@ const runSelfTests = () => {
     return none.length > 40 && none === all;
   })());
 
+  // ---- traced obstructions ----
+  T("obstruction", "a traced box becomes a rectangle in wall inches", (() => {
+    const obs = obstructionsFrom([
+      { id: "a", type: "obst", pts: [{ x: 30, y: 46 }, { x: 70, y: 40 }] },        // drawn bottom-up
+      { id: "b", type: "rect", pts: [{ x: 0, y: 0 }, { x: 9, y: 9 }] },            // plain box: ignored
+      { id: "c", type: "obst", pts: [{ x: 10, y: 10 }, { x: 10.2, y: 10.1 }] },    // a stray tap: dropped
+      { id: "d", type: "obst", text: "shelf", clear: 6, pts: [{ x: 5, y: 20 }, { x: 25, y: 30 }] },
+    ]);
+    if (obs.length !== 2) return false;
+    const a = obs[0], d = obs[1];
+    return a.x0 === 30 && a.x1 === 70 && a.y0 === 40 && a.y1 === 46 && approx(a.clear, CLEARANCE.obstruction)
+        && d.label === "shelf" && d.clear === 6 && d.y1 === 30;
+  })());
+  T("obstruction", "clearance is reported, never silently enforced", (() => {
+    const L = { tvLeft: 20, tvRight: 80, tvBottom: 50, tvTop: 84 };
+    const shelf = obstructionsFrom([{ id: "s", type: "obst", text: "shelf", clear: 3, pts: [{ x: 30, y: 40 }, { x: 60, y: 48 }] }]);
+    const tooClose = obstructionIssues(L, shelf);                       // 2" of gap, 3" wanted
+    const fine = obstructionIssues({ ...L, tvBottom: 52, tvTop: 86 }, shelf);
+    const beside = obstructionIssues({ ...L, tvLeft: 70, tvRight: 110 }, shelf);  // no horizontal overlap
+    const through = obstructionIssues({ ...L, tvBottom: 44, tvTop: 78 }, shelf);
+    return tooClose.length === 1 && /Only 2\.0" above shelf/.test(tooClose[0])
+        && fine.length === 0 && beside.length === 0
+        && through.length === 1 && /overlaps shelf/.test(through[0]);
+  })());
+  T("obstruction", "something above the TV constrains downward", (() => {
+    const L = { tvLeft: 20, tvRight: 80, tvBottom: 50, tvTop: 84 };
+    const crown = obstructionsFrom([{ id: "c", type: "obst", text: "crown", clear: 4, pts: [{ x: 0, y: 86 }, { x: 120, y: 96 }] }]);
+    const iss = obstructionIssues(L, crown);
+    return iss.length === 1 && /Only 2\.0" below crown/.test(iss[0]);
+  })());
+  T("obstruction", "a traced shelf lifts the recommendation", (() => {
+    const shelf = obstructionsFrom([{ id: "s", type: "obst", clear: 3, pts: [{ x: 60, y: 0 }, { x: 90, y: 52 }] }]);
+    const plain = { selectedSize: 65, brand: "Sony", hasFireplace: false, hasMantel: false,
+                    mantelH: 54, fbOpeningH: 30, useViewDist: false, viewDist: 144 };
+    const before = computeRecommendedCenterH(plain);
+    const after = computeRecommendedCenterH({ ...plain, obstructions: shelf, tvCL: 60 });
+    const { h } = tvDimsFor("Sony", 65);
+    // clear the 52" shelf top by 3", so the centre lands at 55 + h/2
+    const offToTheSide = computeRecommendedCenterH({ ...plain, obstructions: shelf, tvCL: 20 });
+    return approx(before, 42) && approx(after, 55 + h / 2) && approx(offToTheSide, 42);
+  })());
+  T("obstruction", "two obstructions: the higher one wins, and neither flips the other", (() => {
+    const obs = obstructionsFrom([
+      { id: "a", type: "obst", clear: 3, pts: [{ x: 0, y: 0 }, { x: 120, y: 40 }] },
+      { id: "b", type: "obst", clear: 2, pts: [{ x: 0, y: 0 }, { x: 120, y: 58 }] },
+    ]);
+    const r = computeRecommendedCenterH({ selectedSize: 65, brand: "Sony", hasFireplace: false, hasMantel: false,
+                                          mantelH: 54, fbOpeningH: 30, useViewDist: false, viewDist: 144,
+                                          obstructions: obs, tvCL: 60 });
+    const { h } = tvDimsFor("Sony", 65);
+    return approx(r, 60 + h / 2);
+  })());
+
   // ---- perspective rectification ----
   // The plan's verification, exactly: synthesise an angled photo by pushing a
   // KNOWN flat elevation through a KNOWN homography, rectify it, and assert the
@@ -3484,7 +3602,30 @@ const buildSchematic = (S, BASE_P) => {
   // Hand markup goes ABOVE the geometry but BELOW the annotation layer, so a
   // scribbled line cannot strike through a dimension the installer has to read.
   // Blanking patches are excluded — they were painted under the schematic.
-  const inkMarkup = (markup || []).filter(m => m && m.type !== "mask");
+  // Obstructions: the traced thing, plus the band the panel must stay out of.
+  // Drawn before the ink splice so redlines still sit above them.
+  obstructionsFrom(markup).forEach((o, i) => {
+    const x = wallX + o.x0 * scale, w = (o.x1 - o.x0) * scale;
+    const yTop = floorY - o.y1 * scale, hgt = (o.y1 - o.y0) * scale;
+    elements.push(<rect key={K(`ob-${i}`)} x={x} y={yTop} width={w} height={hgt}
+                        fill={P.boxBad} fillOpacity="0.13" stroke={P.boxBad} strokeWidth="1.4"/>);
+    if (o.clear > 0) {
+      const ch = o.clear * scale;
+      elements.push(<rect key={K(`obc-${i}`)} x={x} y={yTop - ch} width={w} height={ch}
+                          fill="none" stroke={P.boxBad} strokeWidth="0.9" strokeDasharray="3 3" opacity="0.75"/>);
+    }
+    if (w > 70) {
+      const t = `${o.label.toUpperCase()} · ${fmt(o.clear)} CLEAR`;
+      const tw = textW(t, FS(9)) + 10;
+      elements.push(<rect key={K(`obl-${i}`)} x={x + 4} y={yTop + hgt / 2 - FS(8)} width={Math.min(tw, Math.max(0, w - 8))} height={FS(13)} rx="2" fill={P.halo}/>);
+      elements.push(<text key={K(`obt-${i}`)} x={x + 9} y={yTop + hgt / 2 + FS(2)} fill={P.boxBad}
+                          fontSize={FS(9)} fontWeight="700" fontFamily="'IBM Plex Mono', monospace" letterSpacing="0.5">{t}</text>);
+    }
+  });
+
+  // Obstructions are constraints, not ink: the schematic draws them with the
+  // palette and its own keep-out band, below the annotation layer.
+  const inkMarkup = (markup || []).filter(m => m && m.type !== "mask" && m.type !== "obst");
   if (inkMarkup.length) {
     const inkEls = renderMarkupEls(inkMarkup, { wallX, floorY, scale, keyPrefix: K("mk"), fmt, paper: P.maskFill, ink: P.line, ts: TS });
     elements.splice(labelStart < 0 ? elements.length : labelStart, 0, ...inkEls);
@@ -3587,6 +3728,24 @@ const sweepConfigs = () => {
   // Tape-out and Mount must not be blank when their Settings toggle is off —
   // they force their own guides. Sweep that path explicitly, since every other
   // tape config above sets showTapeOut: true.
+  // Obstructions draw a box, a keep-out band and a label into the middle of the
+  // wall — a new chance for a collision, so they get swept like everything else.
+  const shelf = (y, w, label) => [{ id: "ob1", type: "obst", clear: 3, text: label,
+                                    pts: [{ x: 60 - w / 2, y: y - 4 }, { x: 60 + w / 2, y }] }];
+  cfgs.push({ ...base, name: "obstruction: wide shelf under the TV", brand: "Sony", selectedSize: 65,
+              mountSystem: "sanus", sanusStyle: "fixed", dispUnits: "dec", hasFireplace: false,
+              markup: shelf(38, 70, "cabinet top") });
+  cfgs.push({ ...base, name: "obstruction: narrow, fullwords ftin XL", brand: "Samsung", selectedSize: 85,
+              mountSystem: "fa", dispUnits: "ftin", hasFireplace: true, fullWords: true,
+              textScale: TEXT_SCALES[TEXT_SCALES.length - 1].v, markup: shelf(64, 24, "sconce") });
+  cfgs.push({ ...base, name: "obstruction: above the TV, mobile", brand: "LG", selectedSize: 55,
+              mountSystem: "sanus", sanusStyle: "tilt", dispUnits: "frac", hasFireplace: false,
+              isMobile: true, viewportW: 375,
+              markup: [{ id: "ob2", type: "obst", clear: 4, text: "crown", pts: [{ x: 0, y: 96 }, { x: 120, y: 104 }] }] });
+  cfgs.push({ ...base, name: "obstruction: two, both under the panel", brand: "Sony", selectedSize: 75,
+              mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "ftin", hasFireplace: false,
+              markup: [...shelf(30, 90, "credenza"), { id: "ob3", type: "obst", clear: 2, text: "shelf",
+                        pts: [{ x: 20, y: 44 }, { x: 50, y: 48 }] }] });
   cfgs.push({ ...base, name: "view:tapeout forced (toggle off)", brand: "Sony", selectedSize: 75, mountSystem: "fa", dispUnits: "ftin", hasFireplace: true, fullWords: true, view: "tapeout", showTapeOut: false });
   cfgs.push({ ...base, name: "view:mount forced (toggle off)", brand: "Sony", selectedSize: 75, mountSystem: "sanus", sanusStyle: "fullmotion", dispUnits: "ftin", hasFireplace: false, fullWords: true, view: "mount", showVesa: false });
   return cfgs;
@@ -3600,9 +3759,9 @@ const runStressSweep = () => {
   const root = ReactDOM.createRoot(host);
   const failures = [];
   cfgs.forEach(cfg => {
-    const recommended = computeRecommendedCenterH({ selectedSize: cfg.selectedSize, brand: cfg.brand, hasFireplace: cfg.hasFireplace, hasMantel: cfg.hasMantel, mantelH: cfg.mantelH, fbOpeningH: cfg.fbOpeningH, useViewDist: false, viewDist: 144 });
-    const centerH = computeCenterH({ mountHeightOverride: cfg.override, heightRef: cfg.heightRef, recommendedCenterH: recommended, selectedSize: cfg.selectedSize, brand: cfg.brand });
     const tvCL = computeTvCL({ wallW: cfg.wallW, hasFireplace: cfg.hasFireplace, fbOffsetIn: cfg.fbOffsetIn || 0, tvOffsetIn: cfg.tvOffsetIn || 0 });
+    const recommended = computeRecommendedCenterH({ selectedSize: cfg.selectedSize, brand: cfg.brand, hasFireplace: cfg.hasFireplace, hasMantel: cfg.hasMantel, mantelH: cfg.mantelH, fbOpeningH: cfg.fbOpeningH, useViewDist: false, viewDist: 144, obstructions: obstructionsFrom(cfg.markup), tvCL });
+    const centerH = computeCenterH({ mountHeightOverride: cfg.override, heightRef: cfg.heightRef, recommendedCenterH: recommended, selectedSize: cfg.selectedSize, brand: cfg.brand });
     const boxModel = recommendBackBox(cfg.selectedSize, cfg.mountSystem, cfg.brand);
     const sanusMount = cfg.mountSystem === "sanus" ? recommendSanusMount(cfg.selectedSize, cfg.sanusStyle || "fixed", cfg.brand) : null;
     const layout = computeLayout({ selectedSize: cfg.selectedSize, brand: cfg.brand, centerH, tvCL, showBackBox: true, effectiveBoxModel: boxModel, mountSystem: cfg.mountSystem, sanusMount });
@@ -4221,6 +4380,8 @@ export default function App() {
   const fbOffsetIn = parseFloat(fbOffsetX) || 0;
   const tvOffsetIn = parseFloat(tvOffsetX) || 0;
   const travelIn = parseFloat(bracketTravel) || 0;
+  const tvCL = computeTvCL({ wallW, hasFireplace, fbOffsetIn, tvOffsetIn });
+  const obstructions = useMemo(() => obstructionsFrom(markup), [markup, catalogRev]);
   const engineInputs = { brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, catalogRev };
 
   // NOTE: catalogRev is a dependency of every memo below that touches the
@@ -4229,8 +4390,8 @@ export default function App() {
   const recommendations = useMemo(() => computeRecommendations({ brand, ...engineInputs }),
     [brand, wallW, wallH, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, catalogRev]);
 
-  const recommendedCenterH = useMemo(() => computeRecommendedCenterH({ selectedSize, ...engineInputs }),
-    [selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, catalogRev]);
+  const recommendedCenterH = useMemo(() => computeRecommendedCenterH({ selectedSize, ...engineInputs, obstructions, tvCL }),
+    [selectedSize, brand, hasFireplace, hasMantel, mantelH, fbOpeningH, useViewDist, viewDist, catalogRev, obstructions, tvCL]);
 
   const centerH = useMemo(() => computeCenterH({ mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand }),
     [mountHeightOverride, heightRef, recommendedCenterH, selectedSize, brand, catalogRev]);
@@ -4254,13 +4415,15 @@ export default function App() {
   const effectiveBoxModel = autoRecommendBox && recommendedBox ? recommendedBox : backBoxModel;
   const vesaSpec = selectedSize ? (VESA_DATA[brand]?.[selectedSize] || null) : null;
 
-  const tvCL = computeTvCL({ wallW, hasFireplace, fbOffsetIn, tvOffsetIn });
 
   const layout = useMemo(() => computeLayout({ selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountSystem, sanusMount }),
     [selectedSize, brand, centerH, tvCL, showBackBox, effectiveBoxModel, mountSystem, sanusMount, catalogRev]);
 
-  const placementIssues = useMemo(() => computePlacementIssues({ layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn }),
-    [layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn]);
+  const placementIssues = useMemo(() => [
+      ...computePlacementIssues({ layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn }),
+      ...obstructionIssues(layout, obstructions),
+    ],
+    [layout, wallW, wallH, hasFireplace, fbOpeningW, fbOffsetIn, obstructions]);
 
   // engine-computed display values (UI does no arithmetic)
   const recommendedDisplayH = heightRef === "bottom" && selectedSize
@@ -5529,6 +5692,43 @@ ${sheetsHtml}
     </div>
   );
 
+  // Traced obstructions, listed so each one can be named and given its own
+  // clearance. A cabinet top wants 3"; a wall sconce you must not foul wants
+  // more. Named ones read better in the placement warnings than "obstruction".
+  const obstructionPanel = obstructions.length > 0 && (
+    <div className="tape-list">
+      <div className="tape-head">
+        <span className="rec-tag" style={{ margin: 0 }}>OBSTRUCTIONS — THE TV KEEPS CLEAR OF THESE</span>
+        <span className="hint" style={{ margin: 0 }}>{obstructions.length} traced</span>
+      </div>
+      <div className="obst-rows">
+        {obstructions.map(o => (
+          <div key={o.id} className="obst-row">
+            <input className="inp" type="text" placeholder="name it — shelf, cabinet, crown"
+                   value={o.label === "obstruction" ? "" : o.label}
+                   onChange={e => setMarkup(ms => ms.map(m => m.id === o.id ? { ...m, text: e.target.value } : m))}/>
+            <input className="inp" type="text" style={{ width: 92 }} placeholder={fmt(CLEARANCE.obstruction)}
+                   value={o.clear}
+                   onChange={e => {
+                     const v = parseFloat(e.target.value);
+                     setMarkup(ms => ms.map(m => m.id === o.id ? { ...m, clear: isFinite(v) && v >= 0 ? v : 0 } : m));
+                   }}/>
+            <span className="hint" style={{ margin: 0, whiteSpace: "nowrap" }}>{fmt(o.y1)} AFF</span>
+            <button className="chip" title="Remove this obstruction"
+                    onClick={() => setMarkup(ms => ms.filter(m => m.id !== o.id))}>✕</button>
+          </div>
+        ))}
+      </div>
+      <div className="hint">
+        {underlay && underlay.datumAff != null
+          ? "Traced on a squared, height-pinned photo — these are measurements."
+          : underlay
+          ? "This photo has no measured height yet, so these positions are approximate. PDF ▾ → SET THE HEIGHT."
+          : "Drawn by hand against the wall dimensions."}
+      </div>
+    </div>
+  );
+
   const statusBar = (
     <div className="status-bar">
       <div className="status-vals">
@@ -5828,7 +6028,9 @@ ${sheetsHtml}
       <button className={`chip ${tool === "off" && !calib ? "on" : ""}`} onClick={() => { setTool("off"); setCalib(null); calibPtsRef.current = []; }} title="Stop drawing — restores normal scrolling">OFF</button>
       {MARKUP_TOOLS.filter(t => t !== "mask" || underlay).map(t => (
         <button key={t} className={`chip ${tool === t ? "on" : ""}`} onClick={() => pickTool(t)}
-                title={t === "mask" ? "Paint over part of the reference drawing so the schematic reads clearly" : undefined}>
+                title={t === "mask" ? "Paint over part of the reference drawing so the schematic reads clearly"
+                     : t === "obst" ? "Box a shelf, cabinet top or crown — the engine keeps the TV clear of it"
+                     : undefined}>
           {TOOL_LABEL[t]}
         </button>
       ))}
@@ -6322,7 +6524,7 @@ ${sheetsHtml}
     sel.forEach((idx, n) => {
       const m = markup[idx];
       if (!m || !m.pts || !m.pts.length) return;
-      if (m.type === "rect" || m.type === "mask") {
+      if (m.type === "rect" || m.type === "mask" || m.type === "obst") {
         const c = rectCorners(m.pts[0], m.pts[m.pts.length - 1]).map(P0);
         els.push(<polygon key={`h${n}`} points={c.map(p => `${p.x},${p.y}`).join(" ")} fill="none"
           stroke="#3ECFE0" strokeWidth="1.5" strokeDasharray="5 3"/>);
@@ -6573,6 +6775,8 @@ ${sheetsHtml}
         .ex-tv { border: 1px solid var(--line2); border-radius: 5px; margin-bottom: var(--sp-1); }
         .ex-tv-row { display: grid; grid-template-columns: 1fr auto auto; gap: var(--sp-2); align-items: center; padding: 0 var(--sp-2) var(--sp-2); }
         .ex-tv-row .inp { min-width: 96px; }
+        .obst-rows { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .obst-row { display: grid; grid-template-columns: 1fr 92px auto auto; gap: var(--sp-2); align-items: center; }
         .tape-list { border: 1px solid var(--line2); border-radius: 6px; padding: var(--sp-2) var(--sp-3); background: var(--ink2); }
         .tape-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-1); }
         .tape-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-1); }
@@ -6772,6 +6976,7 @@ ${sheetsHtml}
           {legendPanel}
           {canvas}
           {tapeChecklist}
+          {obstructionPanel}
           {upsizePanel}
           {askDialog}
           {inkDialog}
