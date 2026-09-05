@@ -9,8 +9,11 @@ back box, and power / low-voltage rough-in positions, then draws a dimensioned
 front elevation you can hand to an installer or a GC. Import the architect's
 elevation as a PDF and trace directly over it at true scale.
 
-It runs entirely in the browser. No build step, no server, no account. Open the
-page on a laptop or an iPad on site and it works offline after the first load.
+It runs entirely in the browser. No build step, no server, no account, and no
+CDN — React and pdf.js are vendored, so it works with the network off. Open the
+page on a laptop or an iPad on site and it just works.
+
+An iPhone/iPad app shell lives in [`ios/`](ios/README.md).
 
 ---
 

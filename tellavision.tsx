@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.3.1";
+const APP_VERSION = "2.4.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -570,9 +570,12 @@ const buildPartsList = ({ layout, showOutlet, showLowVolt }) => {
 //   wall inches -> native px:  px = (x - ox) * ppi , py = (oy - y) * ppi
 const UNDERLAY_MAX_PX = 1800;    // long-side cap for a rendered page bitmap
 const UNDERLAY_JPEG_Q = 0.82;
+// pdf.js is vendored, not pulled from a CDN. An offline field tool should not
+// need a prior online session before it can open a drawing, and an App Store
+// build has to work with the network off entirely.
 const PDFJS_VERSION = "3.11.174"; // last UMD build — matches the app's no-bundler setup
-const PDFJS_SRC = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.min.js`;
-const PDFJS_WORKER = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.worker.min.js`;
+const PDFJS_SRC = "./vendor/pdf.min.js";
+const PDFJS_WORKER = "./vendor/pdf.worker.min.js";
 
 // Field input: accepts 96, 96", 8', 8'6", 8' 6 1/2", 6 1/2
 const parseLenIn = (raw) => {
@@ -792,6 +795,35 @@ const markupSpan = (m) => {
   return Math.hypot(p[p.length - 1].x - p[0].x, p[p.length - 1].y - p[0].y);
 };
 
+// --- native host bridge ---------------------------------------------------
+// In the iOS/iPadOS app the page runs inside a WKWebView, where a[download]
+// does nothing and window.print() is a no-op — so every export would silently
+// fail. When the native host is present we hand the bytes to it and it drives
+// the system share sheet (Files, Mail, AirDrop). In a browser this is absent
+// and the existing Blob download runs unchanged.
+const nativeBridge = () => {
+  try {
+    const h = window.webkit && window.webkit.messageHandlers;
+    return h && h.tvExport ? h.tvExport : null;
+  } catch { return null; }
+};
+const IS_NATIVE = () => !!nativeBridge();
+
+// One place every export funnels through.
+const saveFile = (filename, mime, payload, encoding = "text") => {
+  const bridge = nativeBridge();
+  if (bridge) { bridge.postMessage({ filename, mime, encoding, payload }); return; }
+  const blob = encoding === "dataurl"
+    ? null
+    : new Blob([payload], { type: mime });
+  const url = blob ? URL.createObjectURL(blob) : payload;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  if (blob) URL.revokeObjectURL(url);
+};
+
 // --- offline bitmap store ------------------------------------------------
 // A rendered page is 1-3 MB; localStorage (already holding the design) caps at
 // ~5 MB, so the bitmap goes to IndexedDB and only its calibration rides along
@@ -848,7 +880,7 @@ const loadPdfJs = () => {
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
       res(window.pdfjsLib);
     };
-    s.onerror = () => { pdfjsPromise = null; rej(new Error("Could not load the PDF engine — connect once to cache it for offline use")); };
+    s.onerror = () => { pdfjsPromise = null; rej(new Error("Could not load the PDF engine (vendor/pdf.min.js missing)")); };
     document.head.appendChild(s);
   });
   return pdfjsPromise;
@@ -2821,11 +2853,8 @@ const DataScreen = ({ onClose, onChange }) => {
   };
 
   const exportOverlay = () => {
-    const blob = new Blob([JSON.stringify({ app: "tellavision-catalog", v: 1, overlay: OVERLAY }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "tellavision-catalog.json"; a.click();
-    URL.revokeObjectURL(url);
+    saveFile("tellavision-catalog.json", "application/json",
+             JSON.stringify({ app: "tellavision-catalog", v: 1, overlay: OVERLAY }, null, 2));
   };
   const importOverlay = (file) => {
     const r = new FileReader();
@@ -3044,6 +3073,15 @@ export default function App() {
   // tap or flick can fire down/move/up inside a single React batch, where a
   // stale closure would silently drop the gesture. State mirrors them for
   // rendering only.
+  // Apple Pencil. Palm rejection is the real win on an iPad: once a pen has
+  // touched down, finger/palm contacts are ignored for a moment so resting your
+  // hand on the drawing does not scribble. Pressure modulates the committed
+  // stroke weight — we track the peak over the stroke because pressure at
+  // touch-down is usually near zero.
+  const lastPenAt = useRef(0);
+  const isPalm = (e) => e.pointerType === "touch" && Date.now() - lastPenAt.current < 1500;
+  const notePen = (e) => { if (e.pointerType === "pen") lastPenAt.current = Date.now(); };
+
   const calibPtsRef = useRef([]);
   const draftRef = useRef(null);
   const [sel, setSel] = useState([]);      // indices into markup (multi-select)
@@ -3362,6 +3400,8 @@ export default function App() {
 
   const onPtrDown = (e) => {
     if (!interactive) return;
+    if (isPalm(e)) return;
+    notePen(e);
     const p = svgPt(e); if (!p) return;
     e.preventDefault();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
@@ -3413,6 +3453,8 @@ export default function App() {
 
   const onPtrMove = (e) => {
     if (!interactive) return;
+    if (isPalm(e)) return;
+    notePen(e);
     const p = svgPt(e); if (!p) return;
     const q = toIn(p);
     if (calib) {
@@ -3449,12 +3491,16 @@ export default function App() {
     const cur = draftRef.current;
     if (!cur) return;
     const qs = cur.type === "pen" ? q : snap(q, cur.type === "rect" || cur.type === "mask" ? null : cur.pts[0], e);
-    const next = cur.type === "pen" ? { ...cur, pts: [...cur.pts, q] } : { ...cur, pts: [cur.pts[0], qs] };
+    const peak = e.pointerType === "pen" ? Math.max(cur.peakP || 0, e.pressure || 0) : cur.peakP;
+    const next = cur.type === "pen"
+      ? { ...cur, pts: [...cur.pts, q], peakP: peak }
+      : { ...cur, pts: [cur.pts[0], qs], peakP: peak };
     draftRef.current = next;
     setDraft(next);
   };
 
-  const onPtrUp = () => {
+  const onPtrUp = (e) => {
+    if (e && isPalm(e)) return;
     if (calib && calib.mode === "box" && dragRef.current && dragRef.current.box) {
       dragRef.current = null;
       const [a, b] = calibPtsRef.current || [];
@@ -3491,7 +3537,13 @@ export default function App() {
     const cur = draftRef.current;
     if (!cur) return;
     draftRef.current = null;
-    const done = cur.type === "pen" ? { ...cur, pts: simplifyPts(cur.pts) } : cur;
+    let done = cur.type === "pen" ? { ...cur, pts: simplifyPts(cur.pts) } : cur;
+    if (done.peakP > 0) {   // Pencil: press harder for a bolder line
+      const { peakP, ...rest } = done;
+      done = { ...rest, w: +(done.w * (0.65 + 0.75 * Math.min(peakP, 1))).toFixed(2) };
+    } else if (done.peakP !== undefined) {
+      const { peakP, ...rest } = done; done = rest;
+    }
     setDraft(null);
     if (done.type === "pen" ? done.pts.length > 1 : markupSpan(done) > 0.5) setMarkup(m => [...m, done]);
   };
@@ -3520,13 +3572,7 @@ export default function App() {
   const exportSVG = () => {
     if (!printRef.current) return;
     const svgData = new XMLSerializer().serializeToString(printRef.current);
-    const blob = new Blob([svgData], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = exportName("svg");
-    a.click();
-    URL.revokeObjectURL(url);
+    saveFile(exportName("svg"), "image/svg+xml", svgData);
   };
 
   const designState = {
@@ -3544,13 +3590,7 @@ export default function App() {
   };
 
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(buildExportJSON(designState, layout), null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = exportName("json");
-    a.click();
-    URL.revokeObjectURL(url);
+    saveFile(exportName("json"), "application/json", JSON.stringify(buildExportJSON(designState, layout), null, 2));
   };
 
   const exportDXF = () => {
@@ -3561,13 +3601,7 @@ export default function App() {
       showVesa, showOutlet, showLowVolt, showBoxDims, showTapeOut,
       heightRef, projectName, clientName, revision, markup,
     }, layout);
-    const blob = new Blob([dxf], { type: "application/dxf" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = exportName("dxf");
-    a.click();
-    URL.revokeObjectURL(url);
+    saveFile(exportName("dxf"), "application/dxf", dxf);
   };
 
   // The deliverable trio in one click: data, submittal sheet, CAD geometry.
@@ -3675,15 +3709,7 @@ export default function App() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(2, 2);
       ctx.drawImage(img, 0, 0);
-      canvas.toBlob((blob) => {
-        if (!blob) { URL.revokeObjectURL(url); return; }
-        const purl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = purl;
-        a.download = exportName("png");
-        a.click();
-        URL.revokeObjectURL(purl);
-      });
+      saveFile(exportName("png"), "image/png", canvas.toDataURL("image/png"), "dataurl");
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -3790,6 +3816,11 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 <script>window.addEventListener("load", function() { setTimeout(function() { window.print(); }, 500); });</script>
 </body></html>`;
 
+    if (IS_NATIVE()) {
+      // The host renders this HTML to a real PDF and opens the share sheet.
+      saveFile(exportName("pdf"), "application/pdf", html, "html");
+      return;
+    }
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); }
     else alert("Please allow pop-ups to export PDF");
@@ -4754,6 +4785,14 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .mk-sep { width: 1px; align-self: stretch; background: var(--line2); margin: 2px 4px; }
         .mk-sw { width: 22px; height: 22px; border-radius: 3px; border: 2px solid var(--line2); cursor: pointer; padding: 0; }
         .mk-sw.on { border-color: var(--acc); box-shadow: 0 0 0 2px var(--ink2), 0 0 0 3px var(--acc); }
+        /* iPhone/iPad safe areas — the app fills the screen when installed to
+           the Home Screen or running in the native shell. */
+        .hdr { padding-left: max(18px, env(safe-area-inset-left)); padding-right: max(18px, env(safe-area-inset-right)); padding-top: max(14px, env(safe-area-inset-top)); }
+        .sidebar { padding-left: max(14px, env(safe-area-inset-left)); }
+        .main-col { padding-right: max(14px, env(safe-area-inset-right)); }
+        .status-bar { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+        .tab-bar { padding-bottom: max(0px, calc(env(safe-area-inset-bottom) / 2)); }
+
         /* ---- narrative flow: stage headings, start panel, drop target ---- */
         .stage { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
                  margin: 20px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }

@@ -52,7 +52,9 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 
 ## Acceptance checks — do not publish if any fail
 
-- Status-bar badge reads **✓ 100/100** (embedded self-tests; if red the math is
+- Status-bar badge reads **✓ 100/100**
+- No CDN: `grep -c unpkg index.html` must be **0**. React and pdf.js are
+  vendored in `vendor/`; the app must run with the network off. (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
 - In the diagnostics panel, run **SWEEP** → **0 failing / ~95 configs**
   (label-collision audit — includes L and XL type runs).
