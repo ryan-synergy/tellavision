@@ -336,14 +336,35 @@ The app self-tests on every load. The badge in the status bar is the contract:
   `0 overlaps · 0 clipped · 0 unbacked`. It runs against the *active* theme, so
   switching theme re-audits the drawing.
 
-Three DOM audits back the chrome, run in the browser against the live page over
+Four DOM audits back the chrome, run in the browser against the live page over
 3 themes × 2 densities × 4 stages, all currently at zero:
 
 - **Contrast** — WCAG AA, 4.5:1 body / 3:1 large, main UI and settings panel.
-- **Tap targets** — nothing interactive below 44×44, in either density. The one
-  deliberate exception is the diagnostics badge, at 40px tall: the status bar is
-  a fixed thin strip and a 44px badge would dominate it.
-- **Type floor** — nothing below 9.5px, in either density.
+- **Tap targets** — nothing interactive below 44×44, in either density. There
+  used to be an exception here for the diagnostics badge at 40px, on the grounds
+  that the status bar was a thin strip a 44px badge would dominate. That stopped
+  being true when the density work moved the measured values into the bar: it is
+  now ~118px tall and the badge is a third of it. The exception is gone.
+- **Type floor** — nothing below 9.5px in the chrome. Text inside the `<svg>`
+  is exempt and must be, because the drawing is a scale drawing that zooms —
+  audit `el.closest("svg")` out or you will get 24 false hits and start
+  enlarging dimension labels that are correct.
+- **Reach** — no interactive element with `right > innerWidth`, swept across
+  every iPad viewport: 744×1133 / 820×1180 / 834×1210 (portrait), 1133×744 /
+  1180×820 / 1376×1032 (landscape), plus 390×844 for the phone. This one is
+  worth running separately from the tap audit because it catches a different
+  failure: a control that is the right *size* and simply not on screen.
+
+That last audit exists because it found one. `UNDO` and `CLEAR` rode at the end
+of the markup bar, which is `overflow-x: auto` with the scrollbar deliberately
+hidden below the mobile breakpoint. On an iPad mini in portrait that put both
+100px past the right edge, reachable only by a horizontal swipe on a bar that
+looks like it simply ends. The actions now live in a pinned `.mk-acts` cluster
+outside the scrolling strip, and the scroll behaviour was pulled back from
+767px to 599px so a 744pt iPad wraps the tools instead of hiding them. **A
+scrolling toolbar is a fine home for tools and a terrible home for actions** —
+tools have visible state and you can hunt for them, but nobody scrolls sideways
+looking for undo.
 
 Two things to know before running these yourself. **Disable CSS transitions
 first** (`transition: none !important`) — a hidden browser pane freezes them

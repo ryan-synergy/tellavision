@@ -1,4 +1,4 @@
-const CACHE = "tellavision-v3-5-0";
+const CACHE = "tellavision-v3-5-1";
 const CORE = [
   "./",
   "./index.html",

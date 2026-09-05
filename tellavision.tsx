@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "3.5.0";
+const APP_VERSION = "3.5.1";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -6128,6 +6128,12 @@ ${sheetsHtml}
   };
 
   const markupBar = (
+    // The action cluster is pinned outside the scrolling strip. It used to
+    // ride along with the tools, which put UNDO 100px off the right edge of
+    // an iPad mini in portrait -- reachable only by a horizontal swipe on a
+    // bar whose scrollbar is deliberately hidden. Undo is the control you
+    // want most after drawing the wrong thing; it does not get to hide.
+    <div className="mk-wrap">
     <div className="mk-bar">
       <button className={`chip ${tool === "off" && !calib ? "on" : ""}`} onClick={() => { setTool("off"); setCalib(null); calibPtsRef.current = []; }} title="Stop drawing — restores normal scrolling">OFF</button>
       {MARKUP_TOOLS.filter(t => t !== "mask" || underlay).map(t => (
@@ -6181,10 +6187,6 @@ ${sheetsHtml}
           )}
         </div>
       )}
-      <span className="mk-sep"/>
-      {sel.length > 0 && <button className="chip on" onClick={deleteSel} title="Delete the selection (or press Delete)">DELETE {sel.length > 1 ? `(${sel.length})` : ""}</button>}
-      <button className="chip" onClick={undoMarkup} disabled={!markup.length}>UNDO</button>
-      <button className="chip" onClick={() => { setMarkup([]); setSel([]); }} disabled={!markup.length}>CLEAR</button>
       {underlay && (
         <>
           <span className="mk-sep"/>
@@ -6231,6 +6233,12 @@ ${sheetsHtml}
           </div>
         </>
       )}
+    </div>
+    <div className="mk-acts">
+      {sel.length > 0 && <button className="chip on" onClick={deleteSel} title="Delete the selection (or press Delete)">DELETE {sel.length > 1 ? `(${sel.length})` : ""}</button>}
+      <button className="chip" onClick={undoMarkup} disabled={!markup.length}>UNDO</button>
+      <button className="chip" onClick={() => { setMarkup([]); setSel([]); }} disabled={!markup.length}>CLEAR</button>
+    </div>
     </div>
   );
 
@@ -6853,7 +6861,9 @@ ${sheetsHtml}
         .chip:disabled { opacity: 0.3; cursor: not-allowed; }
 
         /* markup toolbar — sits directly over the drawing so tools are a thumb away */
-        .mk-bar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 0 0 9px; margin-bottom: 9px; border-bottom: 1px solid var(--line); }
+        .mk-wrap { display: flex; align-items: flex-start; gap: var(--sp-2); padding: 0 0 9px; margin-bottom: 9px; border-bottom: 1px solid var(--line); }
+        .mk-bar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; flex: 1 1 auto; min-width: 0; }
+        .mk-acts { display: flex; gap: 5px; align-items: center; flex: 0 0 auto; }
         .mk-sep { width: 1px; align-self: stretch; background: var(--line2); margin: 2px 4px; }
         .mk-sw { position: relative; width: var(--tap); height: var(--tap); border-radius: 3px; border: 2px solid var(--sw-brd); cursor: pointer; padding: 0; }
         .mk-sw.on { border-color: var(--acc); box-shadow: 0 0 0 2px var(--ink2), 0 0 0 3px var(--acc); }
@@ -6871,10 +6881,11 @@ ${sheetsHtml}
         .tab-bar { padding-bottom: max(0px, calc(env(safe-area-inset-bottom) / 2)); }
 
         /* ---- narrative flow: stage headings, start panel, drop target ---- */
-        @media (max-width: 767px) {
+        @media (max-width: 599px) {
           .mk-bar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
           .mk-bar::-webkit-scrollbar { display: none; }
           .mk-bar > * { flex: 0 0 auto; }
+          .mk-acts { border-left: 1px solid var(--line2); padding-left: var(--sp-2); }
         }
         .ex-tv { border: 1px solid var(--line2); border-radius: 5px; margin-bottom: var(--sp-1); }
         .ex-tv-row { display: grid; grid-template-columns: 1fr auto auto; gap: var(--sp-2); align-items: center; padding: 0 var(--sp-2) var(--sp-2); }
@@ -6996,7 +7007,7 @@ ${sheetsHtml}
         .sv em { font-style: normal; color: var(--txt3); font-size: var(--fs-tag); letter-spacing: var(--tr-chip); margin-right: 3px; }
         .dim-sv { color: var(--txt3); letter-spacing: 1.5px; font-size: 10px; }
         .status-right { display: flex; gap: 8px; align-items: center; }
-        .diag-badge { font-family: var(--fm); font-size: var(--fs-tag); padding: 0 var(--sp-2); min-height: var(--tap-sm); border-radius: 3px; border: 1px solid; cursor: pointer; background: transparent; }
+        .diag-badge { font-family: var(--fm); font-size: var(--fs-tag); padding: 0 var(--sp-2); min-height: var(--tap); border-radius: 3px; border: 1px solid; cursor: pointer; background: transparent; }
         .diag-badge.ok { color: var(--ok); border-color: currentColor; }
         .diag-badge.bad { color: var(--warn); border-color: currentColor; }
         .diag-panel { position: fixed; right: 14px; bottom: 14px; width: min(520px, calc(100vw - 28px)); max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line2); border-radius: 6px; padding: 12px; z-index: 60; box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
