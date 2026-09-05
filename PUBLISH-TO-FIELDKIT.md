@@ -65,7 +65,7 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - No CDN: `grep -c unpkg index.html` must be **0**. React and pdf.js are
   vendored in `vendor/`; the app must run with the network off. (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
-- In the diagnostics panel, run **SWEEP** → **0 failing / 125 configs**
+- In the diagnostics panel, run **SWEEP** → **0 failing / 130 configs**
   (label-collision audit — includes L and XL type runs).
 - Render audit reads **0 overlaps · 0 clipped · 0 unbacked** in all three
   themes (it audits the ACTIVE theme, so switch and re-read).
@@ -79,6 +79,13 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - `DESCRIBE IT` with *mantel at five three* must refuse it as ambiguous, and
   *wall ten wide* must report the value as out of range. Neither may apply
   silently — the whole point of the confirm step.
+- `IMPORT ▾ → PHOTOGRAPH THE WALL` opens the camera on a device. Then
+  `PDF ▾ → SQUARE UP A PHOTO`, four taps on a door, choose 80" × 32": the photo
+  comes back square and the door measures 32" wide with the measure tool.
+- Switch to the **Client** view: the drawing must contain the photo and a
+  rendered TV and NOTHING else — no grid, outline, dimensions, title block or
+  parametric fireplace. EXPORT → PDF from that view is a single page with no
+  spec table and no "NOT TO SCALE" footer.
 - EXPORT → FULL PACK produces a JSON download, a DXF download, and opens the
   PDF print window.
 - Mobile width shows the SETUP / DRAWING / SPECS tabs.

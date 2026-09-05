@@ -19,7 +19,7 @@
 const { useState, useMemo, useRef, useEffect } = React;
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.1.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -4389,9 +4389,28 @@ const VIEW_PRESETS = {
     force: {
       tape: 1
     }
+  },
+  // The client view is not a filter with everything switched off — it is a
+  // different KIND of drawing. `chrome: 0` drops the wall outline, floor,
+  // dimension lines and title block; `panel: 1` draws a television instead of a
+  // rectangle. A client view of a blueprint is not persuasive; a client view of
+  // their own wall is, and that is the whole point of the camera work.
+  client: {
+    label: "Client",
+    hint: "their wall, their TV, nothing else",
+    tvDims: 0,
+    vesa: 0,
+    box: 0,
+    pwr: 0,
+    lv: 0,
+    tape: 0,
+    mount: 0,
+    chrome: 0,
+    panel: 1,
+    force: {}
   }
 };
-const VIEW_ORDER = ["full", "layout", "roughin", "mount", "tapeout"];
+const VIEW_ORDER = ["full", "layout", "roughin", "mount", "tapeout", "client"];
 const SCREEN_PALETTE = {
   id: "scr",
   canvas: "#0D1B2A",
@@ -4835,6 +4854,8 @@ const buildSchematic = (S, BASE_P) => {
   // raw flags, so a view can never alter what the job contains.
   const V = VIEW_PRESETS[S.view] || VIEW_PRESETS.full;
   const F = V.force || {};
+  const vChrome = V.chrome !== 0; // wall outline, floor, wall dims, title block
+  const vPanel = !!V.panel; // draw a television, not a wireframe
   // on(group, toggle): the view must allow the group, and either the user asked
   // for it or the view guarantees it (derived aids only — see VIEW_PRESETS).
   const on = (g, t) => !!V[g] && (!!t || !!F[g]);
@@ -5051,7 +5072,7 @@ const buildSchematic = (S, BASE_P) => {
       y: floorY - underlay.oy * scale,
       width: underlayInW(underlay) * scale,
       height: underlayInH(underlay) * scale,
-      opacity: underlay.opacity ?? 0.75,
+      opacity: vPanel ? 1 : underlay.opacity ?? 0.75,
       preserveAspectRatio: "none",
       clipPath: cr ? `url(#${clipId})` : undefined
     }));
@@ -5075,38 +5096,46 @@ const buildSchematic = (S, BASE_P) => {
   }
 
   // wall + floor — fill drops to none over an underlay so the scan shows through
-  elements.push(/*#__PURE__*/React.createElement("rect", {
-    key: K("wall"),
-    x: wallX,
-    y: wallY,
-    width: wallPxW,
-    height: wallPxH,
-    fill: hasUnderlay ? "none" : P.wallFill,
-    stroke: P.wallStroke,
-    strokeWidth: "1.5"
-  }));
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("floor"),
-    x1: wallX - 20,
-    y1: floorY,
-    x2: wallX + wallPxW + 20,
-    y2: floorY,
-    stroke: P.line,
-    strokeWidth: "2"
-  }));
-  for (let i = 0; i < 12; i++) {
-    const x = wallX - 18 + i * ((wallPxW + 36) / 12);
+  if (vChrome) {
+    elements.push(/*#__PURE__*/React.createElement("rect", {
+      key: K("wall"),
+      x: wallX,
+      y: wallY,
+      width: wallPxW,
+      height: wallPxH,
+      fill: hasUnderlay ? "none" : P.wallFill,
+      stroke: P.wallStroke,
+      strokeWidth: "1.5"
+    }));
     elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K(`hatch-${i}`),
-      x1: x,
+      key: K("floor"),
+      x1: wallX - 20,
       y1: floorY,
-      x2: x + 6,
-      y2: floorY + 8,
-      stroke: P.lineSoft,
-      strokeWidth: "0.8"
+      x2: wallX + wallPxW + 20,
+      y2: floorY,
+      stroke: P.line,
+      strokeWidth: "2"
     }));
   }
-  if (hasFireplace) {
+  if (vChrome) {
+    for (let i = 0; i < 12; i++) {
+      const x = wallX - 18 + i * ((wallPxW + 36) / 12);
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K(`hatch-${i}`),
+        x1: x,
+        y1: floorY,
+        x2: x + 6,
+        y2: floorY + 8,
+        stroke: P.lineSoft,
+        strokeWidth: "0.8"
+      }));
+    }
+  }
+
+  // The parametric fireplace is a stand-in for one nobody has photographed. Over
+  // an actual photo of the actual fireplace it is not just redundant, it is
+  // wrong — a symbol drawn on top of the thing it symbolises.
+  if (hasFireplace && vChrome) {
     const fbW = fbOpeningW * scale;
     const fbH = fbOpeningH * scale;
     const fbX = wallX + (wallPxW - fbW) / 2 + fbOffsetIn * scale;
@@ -5213,26 +5242,112 @@ const buildSchematic = (S, BASE_P) => {
     const clPx = wallX + layout.tvCL * scale;
 
     // TV
-    elements.push(/*#__PURE__*/React.createElement("rect", {
-      key: K("tv"),
-      x: tvX,
-      y: tvY,
-      width: tvPxW,
-      height: tvPxH,
-      fill: P.tvFill,
-      stroke: P.tvStroke,
-      strokeWidth: "1.5"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("rect", {
-      key: K("tvscreen"),
-      x: tvX + 3,
-      y: tvY + 3,
-      width: tvPxW - 6,
-      height: tvPxH - 6,
-      fill: P.screenFill,
-      stroke: "none"
-    }));
-    if (tvPxW > 120) {
+    if (vPanel) {
+      // A television, not a rectangle. The client is being shown their own room;
+      // an engineering wireframe floating on the photo undoes the point of
+      // photographing it. Three things do almost all the work: a real drop
+      // shadow so it sits ON the wall instead of over it, a near-black screen
+      // (an off TV is very dark, not grey), and a sheen so the glass reads as
+      // glass. Dimensions are deliberately absent — this sheet is not built from.
+      const sid = K("shadow"),
+        gid = K("glass");
+      const r = Math.min(6, tvPxH * 0.04);
+      elements.push(/*#__PURE__*/React.createElement("defs", {
+        key: K("panel-defs")
+      }, /*#__PURE__*/React.createElement("filter", {
+        id: sid,
+        x: "-25%",
+        y: "-25%",
+        width: "150%",
+        height: "160%"
+      }, /*#__PURE__*/React.createElement("feDropShadow", {
+        dx: "0",
+        dy: Math.max(2, tvPxH * 0.03),
+        stdDeviation: Math.max(3, tvPxH * 0.035),
+        floodColor: "#000000",
+        floodOpacity: "0.45"
+      })), /*#__PURE__*/React.createElement("linearGradient", {
+        id: gid,
+        x1: "0",
+        y1: "0",
+        x2: "0.35",
+        y2: "1"
+      }, /*#__PURE__*/React.createElement("stop", {
+        offset: "0%",
+        stopColor: "#FFFFFF",
+        stopOpacity: "0.14"
+      }), /*#__PURE__*/React.createElement("stop", {
+        offset: "45%",
+        stopColor: "#FFFFFF",
+        stopOpacity: "0.04"
+      }), /*#__PURE__*/React.createElement("stop", {
+        offset: "100%",
+        stopColor: "#FFFFFF",
+        stopOpacity: "0.01"
+      }))));
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("tv"),
+        x: tvX,
+        y: tvY,
+        width: tvPxW,
+        height: tvPxH,
+        rx: r,
+        fill: "#101215",
+        filter: `url(#${sid})`
+      }));
+      const bez = Math.max(1.5, Math.min(4, tvPxW * 0.006));
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("tvscreen"),
+        x: tvX + bez,
+        y: tvY + bez,
+        width: Math.max(0, tvPxW - bez * 2),
+        height: Math.max(0, tvPxH - bez * 2),
+        rx: Math.max(0, r - 1),
+        fill: "#07080A"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("tvglass"),
+        x: tvX + bez,
+        y: tvY + bez,
+        width: Math.max(0, tvPxW - bez * 2),
+        height: Math.max(0, tvPxH - bez * 2),
+        rx: Math.max(0, r - 1),
+        fill: `url(#${gid})`
+      }));
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("tvedge"),
+        x: tvX,
+        y: tvY,
+        width: tvPxW,
+        height: tvPxH,
+        rx: r,
+        fill: "none",
+        stroke: "#000000",
+        strokeOpacity: "0.55",
+        strokeWidth: "1"
+      }));
+    } else {
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("tv"),
+        x: tvX,
+        y: tvY,
+        width: tvPxW,
+        height: tvPxH,
+        fill: P.tvFill,
+        stroke: P.tvStroke,
+        strokeWidth: "1.5"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("tvscreen"),
+        x: tvX + 3,
+        y: tvY + 3,
+        width: tvPxW - 6,
+        height: tvPxH - 6,
+        fill: P.screenFill,
+        stroke: "none"
+      }));
+    }
+    if (tvPxW > 120 && !vPanel) {
       elements.push(/*#__PURE__*/React.createElement("text", {
         key: K("tvlabel"),
         x: tvX + 8,
@@ -5602,87 +5717,91 @@ const buildSchematic = (S, BASE_P) => {
     });
 
     // ----- dimensions -----
-    // height (left)
-    const dimX = wallX - 32;
-    const refY = heightRef === "bottom" ? tvY + tvPxH : tvCenterY;
-    const refLabel = heightRef === "bottom" ? "TO BOTTOM" : "TO CENTER";
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("dh"),
-      x1: dimX,
-      y1: floorY,
-      x2: dimX,
-      y2: refY,
-      stroke: P.line,
-      strokeWidth: P.dimW
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("dha"),
-      x1: dimX - 4,
-      y1: floorY,
-      x2: dimX + 4,
-      y2: floorY,
-      stroke: P.line,
-      strokeWidth: P.dimW
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("dhb"),
-      x1: dimX - 4,
-      y1: refY,
-      x2: dimX + 4,
-      y2: refY,
-      stroke: P.line,
-      strokeWidth: P.dimW
-    }));
-    const dhMidY = (floorY + refY) / 2;
-    const dhW = Math.max(textW(leftDimText, FS(13)), textW(refLabel, FS(8))) + 8; // plate must cover BOTH lines
-    elements.push(/*#__PURE__*/React.createElement("rect", {
-      key: K("dhbg"),
-      x: dimX - 8 - dhW,
-      y: dhMidY - FS(12),
-      width: dhW + 4,
-      height: FS(35),
-      fill: P.halo,
-      stroke: "none",
-      rx: "2"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("text", {
-      key: K("dht"),
-      x: dimX - 8,
-      y: dhMidY + FS(4),
-      textAnchor: "end",
-      fill: P.dimText,
-      fontSize: FS(13),
-      fontWeight: "600",
-      fontFamily: "'IBM Plex Mono', monospace"
-    }, leftDimText));
-    elements.push(/*#__PURE__*/React.createElement("text", {
-      key: K("dhl"),
-      x: dimX - 8,
-      y: dhMidY + FS(19),
-      textAnchor: "end",
-      fill: P.dimSub,
-      fontSize: FS(8),
-      fontFamily: "'IBM Plex Mono', monospace",
-      letterSpacing: "1"
-    }, refLabel));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("reft1"),
-      x1: tvX - 12,
-      y1: refY,
-      x2: tvX,
-      y2: refY,
-      stroke: P.cl,
-      strokeWidth: "1.5"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("reft2"),
-      x1: tvX + tvPxW,
-      y1: refY,
-      x2: tvX + tvPxW + 12,
-      y2: refY,
-      stroke: P.cl,
-      strokeWidth: "1.5"
-    }));
+    // Suppressed entirely in the client view: they are being shown their room,
+    // not a drawing to build from.
+    if (vChrome) {
+      // height (left)
+      const dimX = wallX - 32;
+      const refY = heightRef === "bottom" ? tvY + tvPxH : tvCenterY;
+      const refLabel = heightRef === "bottom" ? "TO BOTTOM" : "TO CENTER";
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("dh"),
+        x1: dimX,
+        y1: floorY,
+        x2: dimX,
+        y2: refY,
+        stroke: P.line,
+        strokeWidth: P.dimW
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("dha"),
+        x1: dimX - 4,
+        y1: floorY,
+        x2: dimX + 4,
+        y2: floorY,
+        stroke: P.line,
+        strokeWidth: P.dimW
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("dhb"),
+        x1: dimX - 4,
+        y1: refY,
+        x2: dimX + 4,
+        y2: refY,
+        stroke: P.line,
+        strokeWidth: P.dimW
+      }));
+      const dhMidY = (floorY + refY) / 2;
+      const dhW = Math.max(textW(leftDimText, FS(13)), textW(refLabel, FS(8))) + 8; // plate must cover BOTH lines
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("dhbg"),
+        x: dimX - 8 - dhW,
+        y: dhMidY - FS(12),
+        width: dhW + 4,
+        height: FS(35),
+        fill: P.halo,
+        stroke: "none",
+        rx: "2"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("text", {
+        key: K("dht"),
+        x: dimX - 8,
+        y: dhMidY + FS(4),
+        textAnchor: "end",
+        fill: P.dimText,
+        fontSize: FS(13),
+        fontWeight: "600",
+        fontFamily: "'IBM Plex Mono', monospace"
+      }, leftDimText));
+      elements.push(/*#__PURE__*/React.createElement("text", {
+        key: K("dhl"),
+        x: dimX - 8,
+        y: dhMidY + FS(19),
+        textAnchor: "end",
+        fill: P.dimSub,
+        fontSize: FS(8),
+        fontFamily: "'IBM Plex Mono', monospace",
+        letterSpacing: "1"
+      }, refLabel));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("reft1"),
+        x1: tvX - 12,
+        y1: refY,
+        x2: tvX,
+        y2: refY,
+        stroke: P.cl,
+        strokeWidth: "1.5"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("reft2"),
+        x1: tvX + tvPxW,
+        y1: refY,
+        x2: tvX + tvPxW + 12,
+        y2: refY,
+        stroke: P.cl,
+        strokeWidth: "1.5"
+      }));
+    }
 
     // width (top, lane 0)
     const dimY = tvY - 18;
@@ -5741,69 +5860,71 @@ const buildSchematic = (S, BASE_P) => {
 
     // centerline (top, lane 1 — steps above the width dim when crowded) +
     // dash-dot CL through the wall, stopping short of the width dimension lane
-    const clDimY = wallY + clDimRelY;
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("cl-line"),
-      x1: clPx,
-      y1: wallY + 2,
-      x2: clPx,
-      y2: Math.max(dimY - 8, wallY + 2),
-      stroke: P.cl,
-      strokeWidth: "0.9",
-      strokeDasharray: "9 3 2 3",
-      opacity: "0.8"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("cl-dim"),
-      x1: wallX,
-      y1: clDimY,
-      x2: clPx,
-      y2: clDimY,
-      stroke: P.cl,
-      strokeWidth: P.dimW
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("cl-da"),
-      x1: wallX,
-      y1: clDimY - 4,
-      x2: wallX,
-      y2: clDimY + 4,
-      stroke: P.cl,
-      strokeWidth: P.dimW
-    }));
-    elements.push(/*#__PURE__*/React.createElement("line", {
-      key: K("cl-db"),
-      x1: clPx,
-      y1: clDimY - 4,
-      x2: clPx,
-      y2: clDimY + 4,
-      stroke: P.cl,
-      strokeWidth: P.dimW
-    }));
-    const clTxt = `${fmt(layout.tvCL)} TO TV ${W.CL}`;
-    const clMidX = (wallX + clPx) / 2;
-    const clW = textW(clTxt, FS(10)) + 8;
-    elements.push(/*#__PURE__*/React.createElement("rect", {
-      key: K("cl-bg"),
-      x: clMidX - clW / 2,
-      y: clDimY - FS(16),
-      width: clW,
-      height: FS(13),
-      fill: P.halo,
-      stroke: "none",
-      rx: "2"
-    }));
-    elements.push(/*#__PURE__*/React.createElement("text", {
-      key: K("cl-t"),
-      x: clMidX,
-      y: clDimY - FS(6),
-      textAnchor: "middle",
-      fill: P.cl,
-      fontSize: FS(10),
-      fontWeight: "600",
-      fontFamily: "'IBM Plex Mono', monospace",
-      letterSpacing: "0.5"
-    }, clTxt));
+    if (vChrome) {
+      const clDimY = wallY + clDimRelY;
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("cl-line"),
+        x1: clPx,
+        y1: wallY + 2,
+        x2: clPx,
+        y2: Math.max(dimY - 8, wallY + 2),
+        stroke: P.cl,
+        strokeWidth: "0.9",
+        strokeDasharray: "9 3 2 3",
+        opacity: "0.8"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("cl-dim"),
+        x1: wallX,
+        y1: clDimY,
+        x2: clPx,
+        y2: clDimY,
+        stroke: P.cl,
+        strokeWidth: P.dimW
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("cl-da"),
+        x1: wallX,
+        y1: clDimY - 4,
+        x2: wallX,
+        y2: clDimY + 4,
+        stroke: P.cl,
+        strokeWidth: P.dimW
+      }));
+      elements.push(/*#__PURE__*/React.createElement("line", {
+        key: K("cl-db"),
+        x1: clPx,
+        y1: clDimY - 4,
+        x2: clPx,
+        y2: clDimY + 4,
+        stroke: P.cl,
+        strokeWidth: P.dimW
+      }));
+      const clTxt = `${fmt(layout.tvCL)} TO TV ${W.CL}`;
+      const clMidX = (wallX + clPx) / 2;
+      const clW = textW(clTxt, FS(10)) + 8;
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("cl-bg"),
+        x: clMidX - clW / 2,
+        y: clDimY - FS(16),
+        width: clW,
+        height: FS(13),
+        fill: P.halo,
+        stroke: "none",
+        rx: "2"
+      }));
+      elements.push(/*#__PURE__*/React.createElement("text", {
+        key: K("cl-t"),
+        x: clMidX,
+        y: clDimY - FS(6),
+        textAnchor: "middle",
+        fill: P.cl,
+        fontSize: FS(10),
+        fontWeight: "600",
+        fontFamily: "'IBM Plex Mono', monospace",
+        letterSpacing: "0.5"
+      }, clTxt));
+    }
 
     // tape-out mode: the four lines an installer actually snaps on the wall
     if (vTape) {
@@ -5931,108 +6052,110 @@ const buildSchematic = (S, BASE_P) => {
   }
   if (labelStart < 0) labelStart = elements.length; // no TV picked yet
 
-  // wall width (bottom)
-  const wdY = floorY + 30;
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("ww"),
-    x1: wallX,
-    y1: wdY,
-    x2: wallX + wallPxW,
-    y2: wdY,
-    stroke: P.line,
-    strokeWidth: P.dimW
-  }));
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("wwa"),
-    x1: wallX,
-    y1: wdY - 4,
-    x2: wallX,
-    y2: wdY + 4,
-    stroke: P.line,
-    strokeWidth: P.dimW
-  }));
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("wwb"),
-    x1: wallX + wallPxW,
-    y1: wdY - 4,
-    x2: wallX + wallPxW,
-    y2: wdY + 4,
-    stroke: P.line,
-    strokeWidth: P.dimW
-  }));
-  const wwTxt = `${fmtIn(safeWallW, dispUnits)} WALL`;
-  const wwW = textW(wwTxt, FS(13)) + 10;
-  elements.push(/*#__PURE__*/React.createElement("rect", {
-    key: K("wwbg"),
-    x: wallX + wallPxW / 2 - wwW / 2,
-    y: wdY + 2,
-    width: wwW,
-    height: FS(19),
-    rx: "2",
-    fill: P.halo,
-    stroke: "none"
-  }));
-  elements.push(/*#__PURE__*/React.createElement("text", {
-    key: K("wwt"),
-    x: wallX + wallPxW / 2,
-    y: wdY + FS(16),
-    textAnchor: "middle",
-    fill: P.dimText,
-    fontSize: FS(13),
-    fontWeight: "600",
-    fontFamily: "'IBM Plex Mono', monospace"
-  }, wwTxt));
+  if (vChrome) {
+    // wall width (bottom)
+    const wdY = floorY + 30;
+    elements.push(/*#__PURE__*/React.createElement("line", {
+      key: K("ww"),
+      x1: wallX,
+      y1: wdY,
+      x2: wallX + wallPxW,
+      y2: wdY,
+      stroke: P.line,
+      strokeWidth: P.dimW
+    }));
+    elements.push(/*#__PURE__*/React.createElement("line", {
+      key: K("wwa"),
+      x1: wallX,
+      y1: wdY - 4,
+      x2: wallX,
+      y2: wdY + 4,
+      stroke: P.line,
+      strokeWidth: P.dimW
+    }));
+    elements.push(/*#__PURE__*/React.createElement("line", {
+      key: K("wwb"),
+      x1: wallX + wallPxW,
+      y1: wdY - 4,
+      x2: wallX + wallPxW,
+      y2: wdY + 4,
+      stroke: P.line,
+      strokeWidth: P.dimW
+    }));
+    const wwTxt = `${fmtIn(safeWallW, dispUnits)} WALL`;
+    const wwW = textW(wwTxt, FS(13)) + 10;
+    elements.push(/*#__PURE__*/React.createElement("rect", {
+      key: K("wwbg"),
+      x: wallX + wallPxW / 2 - wwW / 2,
+      y: wdY + 2,
+      width: wwW,
+      height: FS(19),
+      rx: "2",
+      fill: P.halo,
+      stroke: "none"
+    }));
+    elements.push(/*#__PURE__*/React.createElement("text", {
+      key: K("wwt"),
+      x: wallX + wallPxW / 2,
+      y: wdY + FS(16),
+      textAnchor: "middle",
+      fill: P.dimText,
+      fontSize: FS(13),
+      fontWeight: "600",
+      fontFamily: "'IBM Plex Mono', monospace"
+    }, wwTxt));
 
-  // wall height (right, lane-aware)
-  const whX = wallX + hDimRelX;
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("wh"),
-    x1: whX,
-    y1: wallY,
-    x2: whX,
-    y2: floorY,
-    stroke: P.line,
-    strokeWidth: P.dimW
-  }));
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("wha"),
-    x1: whX - 4,
-    y1: wallY,
-    x2: whX + 4,
-    y2: wallY,
-    stroke: P.line,
-    strokeWidth: P.dimW
-  }));
-  elements.push(/*#__PURE__*/React.createElement("line", {
-    key: K("whb"),
-    x1: whX - 4,
-    y1: floorY,
-    x2: whX + 4,
-    y2: floorY,
-    stroke: P.line,
-    strokeWidth: P.dimW
-  }));
-  const whTxt = `${fmtIn(safeWallH, dispUnits)} H`;
-  const whW = textW(whTxt, FS(13)) + 10;
-  elements.push(/*#__PURE__*/React.createElement("rect", {
-    key: K("whbg"),
-    x: whX + 4,
-    y: (wallY + floorY) / 2 - FS(10),
-    width: whW,
-    height: FS(19),
-    rx: "2",
-    fill: P.halo,
-    stroke: "none"
-  }));
-  elements.push(/*#__PURE__*/React.createElement("text", {
-    key: K("wht"),
-    x: whX + 8,
-    y: (wallY + floorY) / 2 + FS(4),
-    fill: P.dimText,
-    fontSize: FS(13),
-    fontWeight: "600",
-    fontFamily: "'IBM Plex Mono', monospace"
-  }, whTxt));
+    // wall height (right, lane-aware)
+    const whX = wallX + hDimRelX;
+    elements.push(/*#__PURE__*/React.createElement("line", {
+      key: K("wh"),
+      x1: whX,
+      y1: wallY,
+      x2: whX,
+      y2: floorY,
+      stroke: P.line,
+      strokeWidth: P.dimW
+    }));
+    elements.push(/*#__PURE__*/React.createElement("line", {
+      key: K("wha"),
+      x1: whX - 4,
+      y1: wallY,
+      x2: whX + 4,
+      y2: wallY,
+      stroke: P.line,
+      strokeWidth: P.dimW
+    }));
+    elements.push(/*#__PURE__*/React.createElement("line", {
+      key: K("whb"),
+      x1: whX - 4,
+      y1: floorY,
+      x2: whX + 4,
+      y2: floorY,
+      stroke: P.line,
+      strokeWidth: P.dimW
+    }));
+    const whTxt = `${fmtIn(safeWallH, dispUnits)} H`;
+    const whW = textW(whTxt, FS(13)) + 10;
+    elements.push(/*#__PURE__*/React.createElement("rect", {
+      key: K("whbg"),
+      x: whX + 4,
+      y: (wallY + floorY) / 2 - FS(10),
+      width: whW,
+      height: FS(19),
+      rx: "2",
+      fill: P.halo,
+      stroke: "none"
+    }));
+    elements.push(/*#__PURE__*/React.createElement("text", {
+      key: K("wht"),
+      x: whX + 8,
+      y: (wallY + floorY) / 2 + FS(4),
+      fill: P.dimText,
+      fontSize: FS(13),
+      fontWeight: "600",
+      fontFamily: "'IBM Plex Mono', monospace"
+    }, whTxt));
+  }
 
   // Hand markup goes ABOVE the geometry but BELOW the annotation layer, so a
   // scribbled line cannot strike through a dimension the installer has to read.
@@ -6054,7 +6177,7 @@ const buildSchematic = (S, BASE_P) => {
 
   // title block + NTS note — stacked on two rows when one can't hold both
   const tbY = svgH - 10;
-  if (hasTitleBlock) {
+  if (hasTitleBlock && vChrome) {
     elements.push(/*#__PURE__*/React.createElement("text", {
       key: K("tb"),
       x: 16,
@@ -6066,7 +6189,10 @@ const buildSchematic = (S, BASE_P) => {
       letterSpacing: "1"
     }, titleStr));
   }
-  elements.push(/*#__PURE__*/React.createElement("text", {
+  // "NOT TO SCALE — DIMENSIONS GOVERN" is a warning to whoever is building from
+  // the sheet. The client view is not built from, and the caveat only reads as
+  // hedging to someone being shown their own living room.
+  if (vChrome) elements.push(/*#__PURE__*/React.createElement("text", {
     key: K("nts"),
     x: svgW - 16,
     y: tbY,
@@ -8672,11 +8798,11 @@ function App() {
       width: "100%",
       height: "100%",
       fill: PRINT_PALETTE.canvas
-    }), /*#__PURE__*/React.createElement("rect", {
+    }), viewKey !== "client" && /*#__PURE__*/React.createElement("rect", {
       width: "100%",
       height: "100%",
       fill: `url(#grid-${viewKey})`
-    }), /*#__PURE__*/React.createElement("text", {
+    }), viewKey !== "client" && /*#__PURE__*/React.createElement("text", {
       x: schem.svgW - 16,
       y: 18,
       textAnchor: "end",
@@ -8684,7 +8810,7 @@ function App() {
       fill: PRINT_PALETTE.title,
       fontFamily: "'IBM Plex Mono', monospace",
       letterSpacing: "2"
-    }, "FRONT ELEVATION"), /*#__PURE__*/React.createElement("text", {
+    }, "FRONT ELEVATION"), viewKey !== "client" && /*#__PURE__*/React.createElement("text", {
       x: 16,
       y: 18,
       fontSize: "9",
@@ -8766,7 +8892,11 @@ function App() {
     // to. The spec and parts tables are NOT repeated: they describe the job, not
     // the sheet, and reprinting them per page invites someone to work from a
     // stale copy of a page they didn't notice was partial.
-    const sheets = multiPagePdf ? VIEW_ORDER.filter(v => v !== "full").map(v => ({
+    // The client sheet is deliberately NOT in the pack: it is a different
+    // artifact for a different person, and it carries no specifications. Sitting
+    // in the client view and exporting gives you that one page on its own.
+    const clientOnly = view === "client";
+    const sheets = multiPagePdf && !clientOnly ? VIEW_ORDER.filter(v => v !== "full" && v !== "client").map(v => ({
       key: v,
       label: VIEW_PRESETS[v].label,
       hint: VIEW_PRESETS[v].hint,
@@ -8805,18 +8935,18 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 .print-btn { position: fixed; top: 12px; right: 12px; padding: 12px 20px; background: #102A43; color: white; border: none; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; font-weight: 600; }
 </style></head><body>
 <button class="print-btn no-print" onclick="window.print()">Print / Save as PDF</button>
-<div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">AV INSTALLATION DRAWING${sheets.length ? ` · SHEET 1 OF ${sheets.length + 1}` : ""}</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
-<div class="schematic-wrap">${sheets.length ? renderViewSvg("full") : svgData}</div>
-<div class="legend-strip">${legendHtml}</div>
-<div class="grid2">
+<div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">${clientOnly ? "PROPOSED INSTALLATION" : `AV INSTALLATION DRAWING${sheets.length ? ` · SHEET 1 OF ${sheets.length + 1}` : ""}`}</div><h1>${docTitle}</h1></div><div class="meta">${clientOnly ? clientName.trim() || "" : metaHtml}</div></div>
+<div class="schematic-wrap"${clientOnly ? ' style="border:none;background:none;padding:0;"' : ""}>${sheets.length ? renderViewSvg("full") : svgData}</div>
+${clientOnly ? "" : `<div class="legend-strip">${legendHtml}</div>`}
+${clientOnly ? "" : `<div class="grid2">
 <div><div class="section-label">Specifications</div><table class="spec-table">${specRowsHtml}</table></div>
 <div>
 <div class="section-label">Rough-In Parts</div><table class="spec-table">${partsHtml}</table>
 <div class="section-label" style="margin-top:16px;">Installation Notes</div>
 <div class="notes-box"><h3>Field verification</h3><p style="margin:0 0 8px 0;">Verify TV VESA pattern and dimensions against the manufacturer spec sheet before drilling. Values are calculated from published specifications and may vary by model variant.</p>${vesaNote}${bbNote}${ratingNote}</div>
 </div>
-</div>
-<div class="footer"><span>Generated ${today} · REV ${revision || "01"}</span><span>NOT TO SCALE — DIMENSIONS GOVERN</span></div>
+</div>`}
+<div class="footer"><span>${clientOnly ? "" : `Generated ${today} · REV ${revision || "01"}`}</span><span>${clientOnly ? "" : "NOT TO SCALE — DIMENSIONS GOVERN"}</span></div>
 ${sheetsHtml}
 <script>window.addEventListener("load", function() { setTimeout(function() { window.print(); }, 500); });<\/script>
 </body></html>`;
@@ -11171,11 +11301,11 @@ ${sheetsHtml}
     width: "100%",
     height: "100%",
     fill: screenSchem.P.canvas
-  }), /*#__PURE__*/React.createElement("rect", {
+  }), view !== "client" && /*#__PURE__*/React.createElement("rect", {
     width: "100%",
     height: "100%",
     fill: "url(#grid-scr)"
-  }), /*#__PURE__*/React.createElement("text", {
+  }), view !== "client" && /*#__PURE__*/React.createElement("text", {
     x: screenSchem.svgW - 16,
     y: 18,
     textAnchor: "end",
@@ -11183,7 +11313,7 @@ ${sheetsHtml}
     fill: screenSchem.P.title,
     fontFamily: "'IBM Plex Mono', monospace",
     letterSpacing: "2"
-  }, "FRONT ELEVATION"), /*#__PURE__*/React.createElement("text", {
+  }, "FRONT ELEVATION"), view !== "client" && /*#__PURE__*/React.createElement("text", {
     x: 16,
     y: 18,
     fontSize: "9",
@@ -11230,7 +11360,7 @@ ${sheetsHtml}
     width: "100%",
     height: "100%",
     fill: "url(#grid-prt)"
-  }), /*#__PURE__*/React.createElement("text", {
+  }), view !== "client" && /*#__PURE__*/React.createElement("text", {
     x: printSchem.svgW - 16,
     y: 18,
     textAnchor: "end",
@@ -11238,7 +11368,7 @@ ${sheetsHtml}
     fill: PRINT_PALETTE.title,
     fontFamily: "'IBM Plex Mono', monospace",
     letterSpacing: "2"
-  }, "FRONT ELEVATION"), /*#__PURE__*/React.createElement("text", {
+  }, "FRONT ELEVATION"), view !== "client" && /*#__PURE__*/React.createElement("text", {
     x: 16,
     y: 18,
     fontSize: "9",

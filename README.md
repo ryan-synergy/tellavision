@@ -112,6 +112,15 @@ stay with the job on the device but are never exported: **the printed sheet
 always prints empty boxes**, because the person holding the tape ticks them with
 a pen.
 
+**Show the client.** A sixth view, **Client** — their wall photographed, with
+the proposed TV on it at true scale, and nothing else. No grid, no wall outline,
+no dimensions, no title block, no parametric fireplace drawn over the real one.
+The TV renders as a television rather than a rectangle: near-black screen, thin
+bezel, and a real drop shadow so it sits on the wall instead of floating over
+it. Exporting from this view gives a single clean page — the client sheet is
+deliberately **not** part of the submittal pack, because it is a different
+artifact for a different person and carries no specifications.
+
 **One stage at a time.** The sidebar is a stepper — START, THE WALL, THE TV,
 THE HARDWARE. Only the stage you are working in shows its controls; the others
 collapse to a row carrying their summary (`120" × 108" · fireplace`, `Sony 75"`)

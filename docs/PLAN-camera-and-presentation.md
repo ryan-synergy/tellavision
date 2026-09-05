@@ -1,6 +1,6 @@
 # Plan — Camera capture & presentation view
 
-Status: **Part 1 built in v3.0.0.** Part 2 (presentation view) still open.
+Status: **Part 1 built in v3.0.0, Part 2 in v3.1.0.**
 Agreed in planning 2026-09-04.
 
 ## Why
@@ -189,3 +189,35 @@ would cut the wrong region out of the squared-up image.
   is now answerable after one real use.
 - Wall-corner path with a derived camera height is NOT built. Only references
   with both dimensions known are offered, which is the safe subset.
+
+
+---
+
+## Built — v3.1.0 (Part 2)
+
+The client view is a sixth VIEW_PRESET, but with two flags the working views do
+not have: `chrome: 0` and `panel: 1`. That distinction turned out to matter —
+"a preset of options that already exist" was not quite true. Suppressing the
+annotations left the wall outline, floor hatch, both wall dimensions, the
+centreline dimension, the title block, the NTS caveat, the header labels **and
+the parametric fireplace** still drawn. The last is the worst: a symbol of a
+fireplace painted on top of a photograph of the actual fireplace.
+
+`NOT TO SCALE — DIMENSIONS GOVERN` is also gone from this sheet. It is a warning
+to whoever builds from the drawing; to someone being shown their own living room
+it only reads as hedging.
+
+The panel render is three things doing nearly all the work: a real drop shadow
+(so it sits ON the wall), a near-black screen (an off TV is very dark, not
+grey), and a faint diagonal sheen so the glass reads as glass.
+
+Sweep coverage came for free — adding `client` to VIEW_ORDER put it straight
+into the per-view stress loop, 125 configs to 130.
+
+### Still open
+
+- **Upsize comparison** (existing TV ghosted beside the proposed one) is NOT
+  built. It needs the rectify step to remember what was tapped: when the
+  reference is "the TV on the wall", its size and rectified position are exactly
+  the ghost, so one tap really would do both jobs. Worth doing next.
+- Document model (a job holds several walls) and AR tape-out remain untouched.
