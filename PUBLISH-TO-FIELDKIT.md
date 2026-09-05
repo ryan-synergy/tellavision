@@ -61,7 +61,7 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 
 ## Acceptance checks — do not publish if any fail
 
-- Status-bar badge reads **✓ 118/118**
+- Status-bar badge reads **✓ 148/148**
 - No CDN: `grep -c unpkg index.html` must be **0**. React and pdf.js are
   vendored in `vendor/`; the app must run with the network off. (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
@@ -85,6 +85,9 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - After squaring up against a door, the height prompt pre-fills **0** and the
   photo snaps so the door stands on the drawn floor line. Re-open
   `PDF ▾ → SET THE HEIGHT`, enter 6, and the photo moves exactly 6" up.
+- Export the design as JSON, RESET, and re-import it: the TV must come back at
+  the SAME height, with the obstructions and their names. A design that does not
+  round-trip is a design you cannot hand to anyone.
 - Draw an **OBSTRUCTION** box across the wall below the TV: the recommended
   centre height must jump to clear its top by the stated clearance, and raising
   that clearance must raise the TV by the same amount.

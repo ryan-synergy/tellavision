@@ -19,7 +19,7 @@
 const { useState, useMemo, useRef, useEffect } = React;
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "3.4.0";
+const APP_VERSION = "3.5.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -928,7 +928,8 @@ const computeTvCL = ({
 const obstructionsFrom = markup => (markup || []).filter(m => m && m.type === "obst" && m.pts && m.pts.length >= 2).map((m, i) => {
   const a = m.pts[0],
     b = m.pts[m.pts.length - 1];
-  const clear = typeof m.clear === "number" && isFinite(m.clear) && m.clear >= 0 ? m.clear : CLEARANCE.obstruction;
+  const n = typeof m.clear === "number" ? m.clear : parseFloat(m.clear);
+  const clear = isFinite(n) && n >= 0 ? n : CLEARANCE.obstruction;
   return {
     id: m.id != null ? m.id : `o${i}`,
     label: m.text && String(m.text).trim() || "obstruction",
@@ -937,7 +938,8 @@ const obstructionsFrom = markup => (markup || []).filter(m => m && m.type === "o
     y0: Math.min(a.y, b.y),
     y1: Math.max(a.y, b.y),
     // AFF, y1 is the top
-    clear
+    clear,
+    clearRaw: m.clear // what the user actually typed, for the field
   };
 }).filter(o => o.x1 - o.x0 > 0.5 && o.y1 - o.y0 > 0.5);
 const obstructionOverlapsX = (o, left, right) => o.x1 > left && o.x0 < right;
@@ -2008,7 +2010,7 @@ const markupContrastRisk = (items, P) => (items || []).map((m, i) => ({
   i
 })).filter(({
   m
-}) => m && m.type !== "mask" && (m.pts || []).length).filter(({
+}) => m && m.type !== "mask" && m.type !== "obst" && (m.pts || []).length).filter(({
   m
 }) => !markupColorSafeOn(m.color || MARKUP_DEFAULT_COLOR, P)).map(({
   m,
@@ -2540,7 +2542,7 @@ const buildExportJSON = (design, layout) => ({
 // R12 ASCII DXF: the most universally importable CAD format. Geometry is at
 // TRUE SCALE in inches — origin at the left wall edge on the floor, Y up —
 // which is exactly the engine's coordinate system (X from left, AFF up).
-const DXF_LAYERS = [["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2], ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30], ["DIMENSIONS", 7], ["CENTERLINE", 1], ["TAPEOUT", 5], ["NOTES", 7], ["MARKUP", 1]];
+const DXF_LAYERS = [["WALL", 7], ["FIREPLACE", 8], ["TV", 7], ["SCREEN", 8], ["VESA", 2], ["MOUNT", 8], ["BACKBOX", 4], ["ELECTRICAL", 3], ["LOWVOLT", 30], ["DIMENSIONS", 7], ["CENTERLINE", 1], ["TAPEOUT", 5], ["NOTES", 7], ["MARKUP", 1], ["OBSTRUCTION", 1]];
 const buildDXF = (S, layout) => {
   if (!layout) return null;
   const fmt = v => fmtIn(v, S.dispUnits);
@@ -2760,6 +2762,10 @@ const buildDXF = (S, layout) => {
       for (let i = 1; i < pts.length; i++) line("MARKUP", pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
     } else if (m.type === "rect") {
       rect("MARKUP", Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+    } else if (m.type === "obst") {
+      // Was falling through to the line branch and exporting as a diagonal.
+      rect("OBSTRUCTION", Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+      if (m.text) text("OBSTRUCTION", Math.min(a.x, b.x) + 1, Math.min(a.y, b.y) + 1, 2, String(m.text).toUpperCase());
     } else if (m.type === "text") {
       text("MARKUP", a.x, a.y, 2, m.text || "");
     } else if (m.type === "measure") {
@@ -2992,6 +2998,37 @@ const normKey = k => String(k).toLowerCase().replace(/[\s_-]/g, "");
 // Pull TV-relevant fields out of ANY JSON — our own exports, the job-walk
 // app, whatever — and ignore everything else. Deep-walks nested objects and
 // arrays. Returns { fields, matched, ignored, notes, native }.
+// Markup arrives from a file, so it is untrusted: every field is checked and
+// anything unrecognised is dropped rather than trusted into state. This matters
+// more than it used to — an obstruction is not decoration, it moves the
+// recommended mount height, so a malformed one would silently change geometry.
+const MARKUP_IMPORT_TYPES = ["pen", "line", "arrow", "rect", "obst", "text", "measure", "mask"];
+const cleanImportedMarkup = arr => {
+  if (!Array.isArray(arr)) return null;
+  const pt = q => q && typeof q.x === "number" && isFinite(q.x) && typeof q.y === "number" && isFinite(q.y) ? {
+    x: q.x,
+    y: q.y
+  } : null;
+  return arr.map((m, i) => {
+    if (!m || typeof m !== "object") return null;
+    if (!MARKUP_IMPORT_TYPES.includes(m.type)) return null;
+    const pts = Array.isArray(m.pts) ? m.pts.map(pt).filter(Boolean) : [];
+    if (pts.length < (m.type === "text" ? 1 : 2)) return null;
+    const out = {
+      id: typeof m.id === "string" && m.id ? m.id : `im${i}`,
+      type: m.type,
+      pts,
+      color: MARKUP_SWATCHES.includes(m.color) ? m.color : MARKUP_DEFAULT_COLOR,
+      w: MARKUP_WIDTHS.includes(m.w) ? m.w : MARKUP_WIDTHS[1]
+    };
+    if (typeof m.text === "string" && m.text) out.text = m.text.slice(0, 120);
+    if (m.type === "obst" && m.clear != null) {
+      const c = typeof m.clear === "number" ? m.clear : parseFloat(m.clear);
+      if (isFinite(c) && c >= 0 && c <= 120) out.clear = c;
+    }
+    return out;
+  }).filter(Boolean);
+};
 const extractImportedDesign = data => {
   const out = {
     fields: {},
@@ -4297,6 +4334,186 @@ const runSelfTests = () => {
     });
     return none.length > 40 && none === all;
   })());
+  T("obstruction", "exports carry it correctly, and it is not mistaken for ink", (() => {
+    const mk = [{
+      id: "s",
+      type: "obst",
+      text: "shelf",
+      clear: 3,
+      color: "#FFFFFF",
+      pts: [{
+        x: 20,
+        y: 30
+      }, {
+        x: 60,
+        y: 38
+      }]
+    }];
+    const st = {
+      wallW: 120,
+      wallH: 108,
+      hasFireplace: false,
+      fbOpeningW: 40,
+      fbOpeningH: 30,
+      fbOffsetIn: 0,
+      hasMantel: false,
+      mantelH: 54,
+      mantelDepth: 8,
+      brand: "Sony",
+      selectedSize: 65,
+      dispUnits: "dec",
+      showVesa: true,
+      showOutlet: true,
+      showLowVolt: true,
+      heightRef: "center",
+      projectName: "T",
+      clientName: "",
+      revision: "01"
+    };
+    const dxf = buildDXF({
+      ...st,
+      markup: mk
+    }, computeLayout({
+      selectedSize: 65,
+      brand: "Sony",
+      centerH: 60,
+      tvCL: 60,
+      showBackBox: true,
+      effectiveBoxModel: recommendBackBox(65, "sanus", "Sony"),
+      mountSystem: "sanus",
+      sanusMount: null
+    }));
+    // A rectangle on its own declared layer, not a diagonal on MARKUP.
+    const declared = /LAYER\r?\n\s*2\r?\nOBSTRUCTION/.test(dxf);
+    const onLayer = dxf.split(/\r?\n/).filter(l => l.trim() === "OBSTRUCTION").length;
+    // and it must not be reported as a stroke that would vanish on paper
+    const risk = markupContrastRisk(mk, PRINT_PALETTE);
+    return declared && onLayer >= 2 && risk.length === 0 && markupContrastRisk([{
+      id: "w",
+      type: "rect",
+      color: "#FFFFFF",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 1,
+        y: 1
+      }]
+    }], PRINT_PALETTE).length === 1;
+  })());
+  T("interop", "a design with obstructions round-trips to the same height", (() => {
+    // The failure this pins: markup was exported and never read back, so
+    // re-opening your own file moved the TV.
+    const mk = [{
+      id: "s",
+      type: "obst",
+      text: "shelf",
+      clear: 3,
+      color: "#FF3B30",
+      w: 2,
+      pts: [{
+        x: 40,
+        y: 32
+      }, {
+        x: 80,
+        y: 36
+      }]
+    }];
+    const back = cleanImportedMarkup(mk);
+    if (!back || back.length !== 1) return false;
+    const args = {
+      selectedSize: 65,
+      brand: "Sony",
+      hasFireplace: false,
+      hasMantel: false,
+      mantelH: 54,
+      fbOpeningH: 30,
+      useViewDist: false,
+      viewDist: 144,
+      tvCL: 60
+    };
+    const before = computeRecommendedCenterH({
+      ...args,
+      obstructions: obstructionsFrom(mk)
+    });
+    const after = computeRecommendedCenterH({
+      ...args,
+      obstructions: obstructionsFrom(back)
+    });
+    const {
+      h
+    } = tvDimsFor("Sony", 65);
+    return approx(before, after) && approx(after, 36 + 3 + h / 2) && back[0].text === "shelf" && back[0].clear === 3;
+  })());
+  T("interop", "malformed markup is dropped, not trusted into state", (() => {
+    const out = cleanImportedMarkup([{
+      type: "obst",
+      pts: [{
+        x: 1,
+        y: 2
+      }, {
+        x: 3,
+        y: 4
+      }]
+    },
+    // ok, defaults filled
+    {
+      type: "obst",
+      pts: [{
+        x: "1",
+        y: 2
+      }, {
+        x: 3,
+        y: 4
+      }]
+    },
+    // non-numeric point
+    {
+      type: "obst",
+      clear: -5,
+      pts: [{
+        x: 1,
+        y: 2
+      }, {
+        x: 3,
+        y: 4
+      }]
+    },
+    // bad clearance -> default
+    {
+      type: "laser",
+      pts: [{
+        x: 1,
+        y: 2
+      }, {
+        x: 3,
+        y: 4
+      }]
+    },
+    // unknown type
+    {
+      type: "obst",
+      pts: [{
+        x: 1,
+        y: 2
+      }]
+    },
+    // too few points
+    {
+      type: "obst",
+      clear: Infinity,
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 1,
+        y: 1
+      }]
+    }, null, "nope", 7]);
+    // survivors: the plain one, the negative-clearance one and the Infinity one —
+    // all three keep their geometry and fall back to the default clearance.
+    return out.length === 3 && out.every(m => m.type === "obst" && MARKUP_SWATCHES.includes(m.color) && m.pts.length === 2) && out.every(m => m.clear === undefined) && cleanImportedMarkup(null) === null && cleanImportedMarkup("x") === null;
+  })());
 
   // ---- traced obstructions ----
   T("obstruction", "a traced box becomes a rectangle in wall inches", (() => {
@@ -4350,6 +4567,45 @@ const runSelfTests = () => {
       }]
     }]);
     if (obs.length !== 2) return false;
+    // clearance may arrive as text (what the field stores) or a number (older
+    // designs, and imports) — both must land on the same inches.
+    const typed = obstructionsFrom([{
+      id: "t",
+      type: "obst",
+      clear: "6.5",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 10,
+        y: 10
+      }]
+    }]);
+    const blank = obstructionsFrom([{
+      id: "b",
+      type: "obst",
+      clear: "",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 10,
+        y: 10
+      }]
+    }]);
+    const junk = obstructionsFrom([{
+      id: "j",
+      type: "obst",
+      clear: "abc",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 10,
+        y: 10
+      }]
+    }]);
+    if (!(typed[0].clear === 6.5 && blank[0].clear === CLEARANCE.obstruction && junk[0].clear === CLEARANCE.obstruction)) return false;
     const a = obs[0],
       d = obs[1];
     return a.x0 === 30 && a.x1 === 70 && a.y0 === 40 && a.y1 === 46 && approx(a.clear, CLEARANCE.obstruction) && d.label === "shelf" && d.clear === 6 && d.y1 === 30;
@@ -6580,7 +6836,7 @@ const buildSchematic = (S, BASE_P) => {
   // Blanking patches are excluded — they were painted under the schematic.
   // Obstructions: the traced thing, plus the band the panel must stay out of.
   // Drawn before the ink splice so redlines still sit above them.
-  obstructionsFrom(markup).forEach((o, i) => {
+  if (vChrome) obstructionsFrom(markup).forEach((o, i) => {
     const x = wallX + o.x0 * scale,
       w = (o.x1 - o.x0) * scale;
     const yTop = floorY - o.y1 * scale,
@@ -9161,8 +9417,9 @@ function App() {
     revision,
     dispUnits,
     markup,
-    // calibration only — the bitmap itself stays in IndexedDB, so a shared
-    // JSON re-imports the annotations and scale but not the drawing
+    // Calibration travels for reference but is NOT applied on import: without the
+    // bitmap (which stays in IndexedDB) restoring a scale would leave a phantom
+    // underlay. Annotations and obstructions DO come back.
     underlay: underlay ? (({
       src,
       ...meta
@@ -9253,8 +9510,20 @@ function App() {
     if (typeof f.clientName === "string") setClientName(f.clientName);
     if (typeof f.revision === "string") setRevision(f.revision);
     if (["dec", "frac", "ftin"].includes(f.dispUnits)) setDispUnits(f.dispUnits);
+    // Markup was in the export all along and was never read back, so a design did
+    // not round-trip: re-importing dropped every annotation, and once
+    // obstructions existed that silently changed the mount height.
+    const matched = [...extracted.matched];
+    const mk = cleanImportedMarkup(f.markup);
+    if (mk) {
+      setMarkup(mk);
+      const dropped = (Array.isArray(f.markup) ? f.markup.length : 0) - mk.length;
+      const obs = mk.filter(m => m.type === "obst").length;
+      if (mk.length) matched.push(`${mk.length} markup item${mk.length === 1 ? "" : "s"}${obs ? ` (${obs} obstruction${obs === 1 ? "" : "s"})` : ""}`);
+      if (dropped > 0) notes.push(`${dropped} markup item${dropped === 1 ? "" : "s"} could not be read and were dropped`);
+    }
     setImportSummary({
-      matched: extracted.matched,
+      matched,
       ignored: extracted.ignored,
       notes,
       native: extracted.native
@@ -10514,15 +10783,12 @@ ${sheetsHtml}
     style: {
       width: 92
     },
-    placeholder: fmt(CLEARANCE.obstruction),
-    value: o.clear,
-    onChange: e => {
-      const v = parseFloat(e.target.value);
-      setMarkup(ms => ms.map(m => m.id === o.id ? {
-        ...m,
-        clear: isFinite(v) && v >= 0 ? v : 0
-      } : m));
-    }
+    placeholder: `${CLEARANCE.obstruction}" clear`,
+    value: o.clearRaw == null ? "" : String(o.clearRaw),
+    onChange: e => setMarkup(ms => ms.map(m => m.id === o.id ? {
+      ...m,
+      clear: e.target.value
+    } : m))
   }), /*#__PURE__*/React.createElement("span", {
     className: "hint",
     style: {

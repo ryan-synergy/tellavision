@@ -2,20 +2,29 @@
 
 The iOS target ships the SAME files GitHub Pages serves. Do not fork them.
 
-Add a **Run Script Phase** to the target, before "Copy Bundle Resources":
+A **Run Script Phase** named "Stage web bundle" does this automatically, before
+"Copy Bundle Resources". It copies `index.html`, `sw.js`, the icons and
+`vendor/` from the repo root into `TellaVision/web`, and then **fails the build**
+if the staged `APP_VERSION` does not match `MARKETING_VERSION`.
 
-```sh
-# Stage the web app into the bundle as a folder reference named "web"
-SRC="$SRCROOT/.."
-DEST="$SRCROOT/TellaVision/web"
-rm -rf "$DEST" && mkdir -p "$DEST/vendor"
-cp "$SRC/index.html" "$SRC/sw.js" "$SRC/favicon.png" "$SRC/apple-touch-icon.png" "$DEST/"
-cp "$SRC"/vendor/*.js "$DEST/vendor/"
-```
+> This paragraph used to describe the phase as something to add by hand, and
+> nobody had. `TellaVision/web` was a manual copy that went stale at v2.4.0 while
+> the web app reached v3.4.0 — five releases. The simulator quietly ran the old
+> bundle, and an archive would have shipped it. The phase is now in the project,
+> and the version check is there so this fails loudly instead of silently.
 
-Then drag `TellaVision/web` into the project as a **folder reference** (blue
-folder, not yellow group) so the directory structure is preserved — the custom
-scheme handler resolves paths relative to it.
+`TellaVision/web` is in the project as a **folder reference** (blue folder, not
+yellow group) so the directory structure is preserved — the custom scheme
+handler resolves paths relative to it.
+
+`TellaVision/web` is committed even though the build regenerates it, so a fresh
+clone builds byte-identically without first running the web build. It is
+generated output: never hand-edit it, and expect it in the diff of every
+release.
+
+If the build stops with `web bundle is X but MARKETING_VERSION is Y`, rebuild
+`index.html` from `tellavision.tsx` or fix the version — do not edit the staged
+copy, it is overwritten every build.
 
 ## Release checklist
 

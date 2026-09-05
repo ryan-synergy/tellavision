@@ -36,7 +36,7 @@
 		000000000000000000000002 = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 000000000000000000000004;
-			buildPhases = ( 00000000000000000000000D, 00000000000000000000000F, 00000000000000000000000E, );
+			buildPhases = ( 0000000000000000000000B1, 00000000000000000000000D, 00000000000000000000000F, 00000000000000000000000E, );
 			buildRules = ();
 			dependencies = ();
 			name = TellaVision;
@@ -67,6 +67,20 @@
 		00000000000000000000000E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( 000000000000000000000016, 000000000000000000000017, 000000000000000000000018, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		0000000000000000000000B1 = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			alwaysOutOfDate = 1;
+			files = ();
+			inputPaths = ();
+			name = "Stage web bundle";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n# Stage the web bundle from the repo root into the app.\n# This phase exists because it did NOT, and the app silently shipped a\n# months-old index.html: BUILD-NOTES described a staging script that was never\n# in the project, and ios/TellaVision/web was a hand copy nobody refreshed.\nSRC=\"$SRCROOT/..\"\nDST=\"$SRCROOT/TellaVision/web\"\nif [ ! -f \"$SRC/index.html\" ]; then\n  echo \"error: $SRC/index.html is missing - rebuild it from tellavision.tsx first\"\n  exit 1\nfi\nrm -rf \"$DST\"\nmkdir -p \"$DST\"\ncp \"$SRC/index.html\" \"$SRC/sw.js\" \"$SRC/favicon.png\" \"$SRC/apple-touch-icon.png\" \"$DST/\"\ncp -R \"$SRC/vendor\" \"$DST/vendor\"\n# Fail loudly when the staged build and the Xcode version disagree - they\n# drifted four releases once and nothing noticed.\nWEB_V=$(grep -o 'APP_VERSION = \"[0-9.]*\"' \"$DST/index.html\" | head -1 | grep -o '[0-9][0-9.]*')\nif [ \"$WEB_V\" != \"$MARKETING_VERSION\" ]; then\n  echo \"error: web bundle is $WEB_V but MARKETING_VERSION is $MARKETING_VERSION\"\n  exit 1\nfi\necho \"staged web bundle $WEB_V\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 /* Begin PBXSourcesBuildPhase section */
 		00000000000000000000000D = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( 000000000000000000000015, 00000000000000000000001A, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
@@ -103,7 +117,7 @@
 		000000000000000000000007 = { isa = XCBuildConfiguration; buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = TellaVision;
@@ -114,7 +128,7 @@
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				MARKETING_VERSION = 3.4.0;
+				MARKETING_VERSION = 3.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.synergyav.tellavision;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -123,7 +137,7 @@
 		000000000000000000000008 = { isa = XCBuildConfiguration; buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = TellaVision;
@@ -134,7 +148,7 @@
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				MARKETING_VERSION = 3.4.0;
+				MARKETING_VERSION = 3.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.synergyav.tellavision;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
