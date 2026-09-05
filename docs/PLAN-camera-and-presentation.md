@@ -216,8 +216,41 @@ into the per-view stress loop, 125 configs to 130.
 
 ### Still open
 
-- **Upsize comparison** (existing TV ghosted beside the proposed one) is NOT
-  built. It needs the rectify step to remember what was tapped: when the
-  reference is "the TV on the wall", its size and rectified position are exactly
-  the ghost, so one tap really would do both jobs. Worth doing next.
 - Document model (a job holds several walls) and AR tape-out remain untouched.
+
+
+---
+
+## Built — v3.2.0 (upsize comparison)
+
+Three findings, in order of how much they mattered.
+
+**The TV reference was wrong.** v3.0.0 scaled the photo using `selectedSize` —
+the TV being *proposed*. On the primary job, an upsize, the panel on the wall is
+a different size, so tapping a 55" while proposing a 75" scaled the entire photo
+36% too large, and nothing about the result would have looked wrong. The picker
+now asks which TV is on the wall, and that answer is the ghost.
+
+**The ghost has to be drawn OVER the new panel.** An upsize means the new TV is
+larger, so a ghost drawn underneath is completely hidden — in exactly the case
+the feature exists for. White dashes on the dark screen.
+
+**Every camera warning had been invisible.** `setUnderlayNote` rendered only
+inside the Reference Drawing section, which the v2.7.0 stage stepper made
+normally collapsed. The obliquity guard, the coverage guard, the wall-size
+mismatch and the MATCH IT refusal were all being written to a hidden element.
+They now render as a banner in the main column beside the import summary. That
+is the *second* bug of this exact shape (the file inputs were the first): a
+conditionally-rendered section is a bad place for anything a user must see.
+
+Position is still a drag, and that is now defensible rather than unfinished:
+MATCH IT refuses when the ghost reads through the floor or above the ceiling,
+which is what an unpositioned photo looks like.
+
+### Still open
+
+- Vertical datum from the photo alone. Scale is solved; AFF is not, and cannot
+  be without one known height. Asking for the existing TV's bottom edge would
+  close it — one tape measurement, and the plan already says width and height
+  are what gets measured on site.
+- Document model, AR tape-out, traced obstructions as constraints.

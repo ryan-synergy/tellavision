@@ -112,6 +112,21 @@ stay with the job on the device but are never exported: **the printed sheet
 always prints empty boxes**, because the person holding the tape ticks them with
 a pen.
 
+**The TV already on the wall does three jobs.** When you square up a photo by
+tapping the existing panel, say which TV it actually is — **the one being
+replaced, not the one you are proposing**. That one tap then gives you scale,
+the upsize comparison, and a height reference:
+
+- The old TV is **ghosted over the new one** in the Client view, so a single
+  image shows exactly how much bigger the new panel is and how much closer it
+  comes to the mantel — the part clients cannot picture.
+- **MATCH IT** puts the new TV where the old one was, same centre height and
+  same centreline. It refuses if the photo is not on the wall yet rather than
+  copying a nonsense height into the design.
+
+The existing TV is stored in the photo's own pixel space, so dragging the photo
+into position carries the ghost with it.
+
 **Show the client.** A sixth view, **Client** — their wall photographed, with
 the proposed TV on it at true scale, and nothing else. No grid, no wall outline,
 no dimensions, no title block, no parametric fireplace drawn over the real one.

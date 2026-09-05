@@ -19,7 +19,7 @@
 const { useState, useMemo, useRef, useEffect } = React;
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -1757,6 +1757,31 @@ const RECTIFY_REFS = [{
   label: "Something else",
   hint: "type both dimensions"
 }];
+
+// Where the TV that was tapped for scale now sits, in WALL INCHES. Kept in the
+// image's own pixel space until asked for, so dragging the photo carries the
+// ghost with it. One helper, because both the drawing and the comparison panel
+// need this answer and two copies of a conversion drift.
+const existingTvInWall = u => {
+  if (!u || !u.existingTv || !u.existingTv.px || !(u.ppi > 0)) return null;
+  const g = u.existingTv;
+  const w = g.px.w / u.ppi,
+    h = g.px.h / u.ppi;
+  const left = u.ox + g.px.x / u.ppi;
+  const top = u.oy - g.px.y / u.ppi;
+  return {
+    brand: g.brand,
+    size: g.size,
+    w,
+    h,
+    left,
+    right: left + w,
+    top,
+    btm: top - h,
+    ctr: top - h / 2,
+    cx: left + w / 2
+  };
+};
 const underlayInW = u => u.natW / u.ppi;
 const underlayInH = u => u.natH / u.ppi;
 
@@ -4237,6 +4262,42 @@ const runSelfTests = () => {
     const tiny = rectifyChecks([[0, 0], [40, 0], [40, 40], [0, 40]], 2000, 2000);
     return okChecks.notes.length === 0 && steepChecks.notes.length === 1 && /angle/i.test(steepChecks.notes[0]) && tiny.notes.length === 1 && /frame/i.test(tiny.notes[0]);
   })());
+  T("rectify", "the tapped TV follows the photo when it is dragged", (() => {
+    // Placed so the reference occupies a known spot, then the photo is moved.
+    // The ghost must move with it — that is the whole reason it is stored in
+    // image pixels rather than wall inches.
+    const u = {
+      natW: 900,
+      natH: 700,
+      ppi: 10,
+      ox: 12,
+      oy: 90,
+      existingTv: {
+        brand: "Sony",
+        size: 55,
+        px: {
+          x: 100,
+          y: 50,
+          w: 484,
+          h: 275
+        }
+      }
+    };
+    const a = existingTvInWall(u);
+    if (!a) return false;
+    const moved = existingTvInWall({
+      ...u,
+      ox: u.ox + 7,
+      oy: u.oy - 3
+    });
+    return approx(a.w, 48.4) && approx(a.h, 27.5) && approx(a.left, 22) && approx(a.top, 85) && approx(a.btm, 57.5) && approx(a.ctr, 71.25) && approx(moved.left, a.left + 7) && approx(moved.top, a.top - 3) && approx(moved.w, a.w) && approx(moved.h, a.h) && existingTvInWall({
+      ...u,
+      existingTv: null
+    }) === null && existingTvInWall({
+      ...u,
+      ppi: 0
+    }) === null;
+  })());
 
   // ---- spoken / typed quick entry ----
   T("spoken", "length: ten foot / 8 foot 6 / seventy-five / 6 1/2 / minus 6", (() => approx(parseLenLoose("ten foot"), 120) && approx(parseLenLoose("8 foot 6"), 102) && approx(parseLenLoose("seventy-five"), 75) && approx(parseLenLoose("6 1/2"), 6.5) && approx(parseLenLoose("minus 6"), -6) && approx(parseLenLoose(`5 foot 3 inches`), 63) && approx(parseLenLoose("a hundred and twenty"), 120) && isNaN(parseLenLoose("banana")))(), ["ten foot", "8 foot 6", "seventy-five", "6 1/2", "minus 6", "5 foot 3 inches", "a hundred and twenty", "banana"].map(x => `${x}=${parseLenLoose(x)}`).join(" "));
@@ -5346,6 +5407,54 @@ const buildSchematic = (S, BASE_P) => {
         fill: P.screenFill,
         stroke: "none"
       }));
+    }
+    // The upsize comparison, drawn OVER the new panel. An upsize means the new
+    // TV is larger, so a ghost underneath it is invisible — which is the one case
+    // the feature exists for. White dashes read cleanly on the dark screen.
+    // The thing tapped to calibrate is the thing ghosted: one tap, both jobs.
+    if (vPanel && existingTvInWall(underlay)) {
+      const g = existingTvInWall(underlay);
+      const gx = wallX + g.left * scale;
+      const gyTop = floorY - g.top * scale;
+      const gw = g.w * scale;
+      const gh = g.h * scale;
+      elements.push(/*#__PURE__*/React.createElement("rect", {
+        key: K("ghost"),
+        x: gx,
+        y: gyTop,
+        width: gw,
+        height: gh,
+        rx: Math.min(5, gh * 0.04),
+        fill: "none",
+        stroke: "#FFFFFF",
+        strokeOpacity: "0.9",
+        strokeWidth: "1.8",
+        strokeDasharray: "9 6"
+      }));
+      if (gw > 90) {
+        const gl = `NOW ${g.size}"`;
+        const glw = textW(gl, FS(10)) + 12;
+        elements.push(/*#__PURE__*/React.createElement("rect", {
+          key: K("ghost-bg"),
+          x: gx + 6,
+          y: gyTop + 6,
+          width: glw,
+          height: FS(15),
+          rx: "2",
+          fill: "#000000",
+          fillOpacity: "0.55"
+        }));
+        elements.push(/*#__PURE__*/React.createElement("text", {
+          key: K("ghost-t"),
+          x: gx + 12,
+          y: gyTop + FS(17),
+          fill: "#FFFFFF",
+          fontSize: FS(10),
+          fontWeight: "700",
+          fontFamily: "'IBM Plex Mono', monospace",
+          letterSpacing: "0.5"
+        }, gl));
+      }
     }
     if (tvPxW > 120 && !vPanel) {
       elements.push(/*#__PURE__*/React.createElement("text", {
@@ -9063,13 +9172,7 @@ ${sheetsHtml}
       width: "100%"
     },
     onClick: () => underlayFileRef.current && underlayFileRef.current.click()
-  }, underlay ? "REPLACE PDF / IMAGE" : "IMPORT PDF / IMAGE"), underlayNote && /*#__PURE__*/React.createElement("div", {
-    className: "hint",
-    style: {
-      marginTop: 8,
-      color: "var(--acc)"
-    }
-  }, underlayNote), underlay && /*#__PURE__*/React.createElement(React.Fragment, null, underlay.pages > 1 && /*#__PURE__*/React.createElement(Field, {
+  }, underlay ? "REPLACE PDF / IMAGE" : "IMPORT PDF / IMAGE"), underlay && /*#__PURE__*/React.createElement(React.Fragment, null, underlay.pages > 1 && /*#__PURE__*/React.createElement(Field, {
     label: `Page (${underlay.pages} total)`,
     hint: pdfBufRef.current ? null : "Re-import the PDF to switch pages after a reload"
   }, /*#__PURE__*/React.createElement("div", {
@@ -9854,6 +9957,64 @@ ${sheetsHtml}
   }) : null), /*#__PURE__*/React.createElement("span", null, txt)))), /*#__PURE__*/React.createElement("div", {
     className: "hint"
   }, "Ticks stay with the job on this device. The printed sheet always prints empty boxes."));
+
+  // The ghost answers the client's question visually; these are the numbers for
+  // you. Deliberately NOT on the client sheet — that image is the answer, and
+  // adding a specification table to it undoes the point.
+  const exTvInfo = existingTvInWall(underlay);
+  const upsizePanel = view === "client" && exTvInfo && layout && /*#__PURE__*/React.createElement("div", {
+    className: "tape-list"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tape-head"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "rec-tag",
+    style: {
+      margin: 0
+    }
+  }, "WHAT CHANGES"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "chip",
+    title: "Put the new TV where the old one is — same centre height, same centreline",
+    onClick: () => {
+      // Straight after rectify the photo sits wherever the maths left
+      // it, so the ghost can be through the floor or above the
+      // ceiling. Copying that into the design would look like a real
+      // height and be nonsense, so refuse and say why.
+      if (exTvInfo.btm < 0 || exTvInfo.top > wallH) {
+        setUnderlayNote(`The photo is not on the wall yet — that TV reads as ${fmt(exTvInfo.btm)} AFF. Drag it into place first (PDF ▾ → MOVE DRAWING).`);
+        return;
+      }
+      // heightRef and the override are set together, so there is
+      // nothing for switchHeightRef to convert.
+      setHeightRef("center");
+      setMountHeightOverride(exTvInfo.ctr.toFixed(1));
+      setTvOffsetX((exTvInfo.cx - (hasFireplace ? wallW / 2 + fbOffsetIn : wallW / 2)).toFixed(1));
+    }
+  }, "MATCH IT")), /*#__PURE__*/React.createElement("div", {
+    className: "tape-rows"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tape-row",
+    style: {
+      cursor: "default"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "NOW"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", null, exTvInfo.brand, " ", exTvInfo.size, "\""), " — ", fmt(exTvInfo.w), " wide")), /*#__PURE__*/React.createElement("div", {
+    className: "tape-row",
+    style: {
+      cursor: "default"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "NEW"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", null, brand, " ", selectedSize, "\""), " — ", fmt(layout.tvW), " wide")), /*#__PURE__*/React.createElement("div", {
+    className: "tape-row",
+    style: {
+      cursor: "default"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "WIDER"), /*#__PURE__*/React.createElement("span", null, fmt(Math.abs(layout.tvW - exTvInfo.w)), " ", layout.tvW >= exTvInfo.w ? "wider" : "narrower", ", ", fmt(Math.abs(layout.tvH - exTvInfo.h)), " ", layout.tvH >= exTvInfo.h ? "taller" : "shorter")), hasFireplace && hasMantel && /*#__PURE__*/React.createElement("div", {
+    className: "tape-row",
+    style: {
+      cursor: "default"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "MANTEL"), /*#__PURE__*/React.createElement("span", null, fmt(layout.tvBottom - mantelH), " clear, was ", fmt(exTvInfo.btm - mantelH)))), /*#__PURE__*/React.createElement("div", {
+    className: "hint"
+  }, "Positions come from where the photo currently sits. Drag it onto the wall first, then MATCH IT."));
   const statusBar = /*#__PURE__*/React.createElement("div", {
     className: "status-bar"
   }, /*#__PURE__*/React.createElement("div", {
@@ -10199,6 +10360,27 @@ ${sheetsHtml}
     className: "startc",
     onClick: () => setStartHidden(true)
   }, /*#__PURE__*/React.createElement("strong", null, "Start blank"), /*#__PURE__*/React.createElement("span", null, "Set the wall by hand and pick a TV. Everything else follows from there."))));
+  const underlayBanner = underlayNote && /*#__PURE__*/React.createElement("div", {
+    className: "import-note"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rec-tag",
+    style: {
+      marginBottom: 4
+    }
+  }, "REFERENCE DRAWING"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      lineHeight: 1.5
+    }
+  }, underlayNote)), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    onClick: () => setUnderlayNote(null)
+  }, "DISMISS"));
   const importBanner = importSummary && /*#__PURE__*/React.createElement("div", {
     className: "import-note"
   }, /*#__PURE__*/React.createElement("div", {
@@ -10469,16 +10651,29 @@ ${sheetsHtml}
   // is world-space — that is what lets calibration survive a resize.
   const runRectify = async (refKey, customW, customH) => {
     if (!underlay || !quadAsk) return;
-    let realW, realH, what;
+    let realW,
+      realH,
+      what,
+      exTv = null;
     if (refKey === "tv") {
-      if (!selectedSize) {
-        setUnderlayNote("Pick the TV size first — the panel's exact dimensions come from the catalog");
+      // The TV ON THE WALL is the one being replaced, which on an upsize is NOT
+      // the size selected in the sidebar. Scaling a 55" panel as if it were the
+      // proposed 75" would make the whole photo 36% too big, and nothing about
+      // the result would look wrong. So it is asked for explicitly.
+      const exBrand = quadAsk.tvBrand || brand;
+      const exSize = quadAsk.tvSize || selectedSize;
+      if (!exSize) {
+        setUnderlayNote("Say which TV is on the wall — its exact panel size comes from the catalog");
         return;
       }
-      const d = tvDimsFor(brand, selectedSize); // catalog override where one exists, formula otherwise
+      const d = tvDimsFor(exBrand, exSize);
       realW = d.w;
       realH = d.h;
-      what = `${brand} ${selectedSize}"`;
+      what = `the ${exBrand} ${exSize}" on the wall`;
+      exTv = {
+        brand: exBrand,
+        size: exSize
+      };
     } else if (refKey === "custom") {
       realW = parseLenIn(customW);
       realH = parseLenIn(customH);
@@ -10506,6 +10701,7 @@ ${sheetsHtml}
       return;
     }
     const checks = rectifyChecks(quad, u.natW, u.natH);
+    const safeW = Math.max(wallW || 1, 1);
     setRectifying(true);
     try {
       const out = await rectifyBitmap(u.src, plan);
@@ -10527,6 +10723,19 @@ ${sheetsHtml}
       });
       // The crop is dropped: it was expressed against the old, unrectified pixel
       // grid and would cut the wrong region out of the squared-up image.
+      // The existing TV is kept in the rectified image's OWN pixel space, not in
+      // wall inches. Its wall position is then derived from ox/oy/ppi at draw
+      // time, so dragging the photo into place carries the ghost with it — and
+      // the photo has to be dragged into place anyway.
+      const existingTv = exTv ? {
+        ...exTv,
+        px: {
+          x: plan.refPx.x,
+          y: plan.refPx.y,
+          w: plan.refPx.w,
+          h: plan.refPx.h
+        }
+      } : null;
       setUnderlay(cur => cur && {
         ...cur,
         src: out.src,
@@ -10536,9 +10745,16 @@ ${sheetsHtml}
         ox,
         oy,
         crop: null,
-        rectified: true
+        rectified: true,
+        existingTv
       });
-      setUnderlayNote([`Squared up from ${what}. Scale is now true — drag to position it.`, ...checks.notes].join(" "));
+      const photoW = out.natW / plan.ppi;
+      const wallNotes = [];
+      // The photo now has a true width. If it disagrees wildly with the wall you
+      // typed, one of the two is wrong and the drawing will look plausible either
+      // way — which is exactly when to say something.
+      if (photoW > safeW * 2.2) wallNotes.push(`That photo is about ${fmt(photoW)} across but the wall is set to ${fmt(safeW)} — check the wall width, or that you tapped the right object.`);else if (photoW < safeW * 0.45) wallNotes.push(`That photo is only about ${fmt(photoW)} across against a ${fmt(safeW)} wall — it may be a detail shot rather than the whole wall.`);
+      setUnderlayNote([`Squared up from ${what}. Scale is now true — drag to position it.`, ...checks.notes, ...wallNotes].join(" "));
     } catch (err) {
       setUnderlayNote(`Could not square that photo up: ${err && err.message ? err.message : err}`);
     } finally {
@@ -10570,14 +10786,54 @@ ${sheetsHtml}
     style: {
       marginBottom: 10
     }
-  }, "Both dimensions have to be known. Four corners of an unknown rectangle fit infinitely many shapes, so one measured side is not enough to remove the perspective."), RECTIFY_REFS.filter(r => r.key !== "custom").map(r => /*#__PURE__*/React.createElement("button", {
+  }, "Both dimensions have to be known. Four corners of an unknown rectangle fit infinitely many shapes, so one measured side is not enough to remove the perspective."), RECTIFY_REFS.filter(r => r.key !== "custom").map(r => r.key === "tv" ? /*#__PURE__*/React.createElement("div", {
+    key: "tv",
+    className: "ex-tv"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "menu-item",
+    style: {
+      cursor: "default"
+    }
+  }, r.label, /*#__PURE__*/React.createElement("span", {
+    className: "menu-sub"
+  }, "the one being replaced — not the size you are proposing")), /*#__PURE__*/React.createElement("div", {
+    className: "ex-tv-row"
+  }, /*#__PURE__*/React.createElement(Seg, {
+    small: true,
+    options: BRANDS.map(b => ({
+      value: b,
+      label: b.toUpperCase()
+    })),
+    value: quadAsk.tvBrand || brand,
+    onChange: b => setQuadAsk(a => ({
+      ...a,
+      tvBrand: b,
+      tvSize: null
+    }))
+  }), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    value: quadAsk.tvSize || "",
+    onChange: e => setQuadAsk(a => ({
+      ...a,
+      tvSize: +e.target.value || null
+    }))
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "size…"), TV_CATALOG[quadAsk.tvBrand || brand].map(sz => /*#__PURE__*/React.createElement("option", {
+    key: sz,
+    value: sz
+  }, sz, "\""))), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    disabled: rectifying || !quadAsk.tvSize,
+    onClick: () => runRectify("tv")
+  }, "USE"))) : /*#__PURE__*/React.createElement("button", {
     key: r.key,
     className: "menu-item",
-    disabled: rectifying || r.key === "tv" && !selectedSize,
+    disabled: rectifying,
     onClick: () => runRectify(r.key)
   }, r.label, /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
-  }, r.key === "tv" && !selectedSize ? "pick a TV size first" : r.hint || ""))), /*#__PURE__*/React.createElement("div", {
+  }, r.hint || ""))), /*#__PURE__*/React.createElement("div", {
     className: "menu-sep"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -11523,6 +11779,9 @@ ${sheetsHtml}
           .mk-bar::-webkit-scrollbar { display: none; }
           .mk-bar > * { flex: 0 0 auto; }
         }
+        .ex-tv { border: 1px solid var(--line2); border-radius: 5px; margin-bottom: var(--sp-1); }
+        .ex-tv-row { display: grid; grid-template-columns: 1fr auto auto; gap: var(--sp-2); align-items: center; padding: 0 var(--sp-2) var(--sp-2); }
+        .ex-tv-row .inp { min-width: 96px; }
         .tape-list { border: 1px solid var(--line2); border-radius: 6px; padding: var(--sp-2) var(--sp-3); background: var(--ink2); }
         .tape-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-1); }
         .tape-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-1); }
@@ -11745,7 +12004,7 @@ ${sheetsHtml}
       setDragOver(false);
       routeFiles(e.dataTransfer && e.dataTransfer.files);
     }
-  }, importBanner, startPanel, sizeStrip, legendPanel, canvas, tapeChecklist, askDialog, inkDialog, sayDialog, heardDialog, quadDialog, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
+  }, importBanner, underlayBanner, startPanel, sizeStrip, legendPanel, canvas, tapeChecklist, upsizePanel, askDialog, inkDialog, sayDialog, heardDialog, quadDialog, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "center",
