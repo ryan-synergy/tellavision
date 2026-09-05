@@ -112,6 +112,18 @@ stay with the job on the device but are never exported: **the printed sheet
 always prints empty boxes**, because the person holding the tape ticks them with
 a pen.
 
+**One measurement pins the photo.** Squaring a photo fixes its **scale** —
+both reference dimensions are known, so inches-per-pixel is solved. It does not
+fix its **position**: nothing in a photograph says how high off the floor
+anything is. So the app asks for one height, and after that every AFF it reads
+off the photo is measured rather than eyeballed.
+
+If you squared up against a **door, it costs nothing** — a door slab stands on
+the floor, so the answer is 0 and the app fills it in. Against a TV it is one
+tape reading of the bottom edge. Skipping is allowed and says plainly that
+heights are approximate until you set one; `PDF ▾ → SET THE HEIGHT` comes back
+to it any time.
+
 **The TV already on the wall does three jobs.** When you square up a photo by
 tapping the existing panel, say which TV it actually is — **the one being
 replaced, not the one you are proposing**. That one tap then gives you scale,

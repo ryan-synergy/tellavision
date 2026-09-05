@@ -82,6 +82,9 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 - `IMPORT ▾ → PHOTOGRAPH THE WALL` opens the camera on a device. Then
   `PDF ▾ → SQUARE UP A PHOTO`, four taps on a door, choose 80" × 32": the photo
   comes back square and the door measures 32" wide with the measure tool.
+- After squaring up against a door, the height prompt pre-fills **0** and the
+  photo snaps so the door stands on the drawn floor line. Re-open
+  `PDF ▾ → SET THE HEIGHT`, enter 6, and the photo moves exactly 6" up.
 - Switch to the **Client** view: the drawing must contain the photo and a
   rendered TV and NOTHING else — no grid, outline, dimensions, title block or
   parametric fireplace. EXPORT → PDF from that view is a single page with no

@@ -249,8 +249,40 @@ which is what an unpositioned photo looks like.
 
 ### Still open
 
-- Vertical datum from the photo alone. Scale is solved; AFF is not, and cannot
-  be without one known height. Asking for the existing TV's bottom edge would
-  close it — one tape measurement, and the plan already says width and height
-  are what gets measured on site.
+- Document model, AR tape-out, traced obstructions as constraints.
+
+
+---
+
+## Built — v3.3.0 (vertical datum)
+
+Scale and position are different problems and the plan conflated them. The
+homography solves **scale** completely — both reference dimensions are known, so
+inches-per-pixel falls out. It says nothing about **position**: a photograph
+contains no information about how high off the floor anything is. Dragging by
+eye was therefore not an unfinished detail, it was the only honest thing the app
+could do with what it knew.
+
+One known height closes it: `oy = AFF + py/ppi`.
+
+**A door carries its own datum.** A slab stands on the finished floor, so its
+bottom edge is 0" AFF by definition — the reference table now records that, the
+prompt pre-fills 0, and squaring up against a door places the photo exactly with
+no tape measure involved at all. That was free and was sitting in the existing
+reference list unnoticed.
+
+Skipping is a first-class outcome, not a failure: the app says heights are
+approximate until one is set, rather than quietly implying precision. The
+comparison panel says which mode it is in, and MATCH IT gives a different
+message depending on whether a bad height means "you have not placed the photo"
+or "the number you gave does not fit this wall".
+
+Verified two ways: the maths is pinned exactly (door foot 0", head 80", a point
+40" up reads 40"), and an end-to-end run through the real UI moved the photo by
+**exactly 6.000 inches** when the datum was changed from 0" to 6".
+
+### Still open
+
+- Horizontal position is still a drag. It matters far less — the centreline is
+  usually "centre it" — and there is no equivalent free datum.
 - Document model, AR tape-out, traced obstructions as constraints.

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -953,14 +953,28 @@ const rectifyBitmap = (imgSrc, plan) => new Promise((resolve, reject) => {
 // References whose BOTH dimensions are known. A single known side is not enough:
 // four corners of an unknown rectangle are consistent with infinitely many
 // shapes, so the proportions have to come from somewhere.
+// `floorAff` is the reference's bottom edge above finished floor, where the
+// object itself settles the question. A door slab sits ON the floor, so it
+// carries its own vertical datum and the photo can be placed exactly with no
+// tape measure at all. A TV does not — that one number has to be measured.
 const RECTIFY_REFS = [
   { key: "tv",      label: "The TV on the wall",   hint: "exact panel size comes from the catalog" },
-  { key: "door",    label: "Door — 80\" × 32\"",   w: 32, h: 80, hint: "standard interior slab" },
-  { key: "door30",  label: "Door — 80\" × 30\"",   w: 30, h: 80 },
-  { key: "door36",  label: "Door — 80\" × 36\"",   w: 36, h: 80 },
+  { key: "door",    label: "Door — 80\" × 32\"",   w: 32, h: 80, floorAff: 0, hint: "standard interior slab — sits on the floor" },
+  { key: "door30",  label: "Door — 80\" × 30\"",   w: 30, h: 80, floorAff: 0 },
+  { key: "door36",  label: "Door — 80\" × 36\"",   w: 36, h: 80, floorAff: 0 },
   { key: "sheet",   label: "Drywall sheet — 48\" × 96\"", w: 48, h: 96, hint: "pre-drywall only" },
   { key: "custom",  label: "Something else",       hint: "type both dimensions" },
 ];
+
+// Vertical datum. The homography fixes SCALE — both reference dimensions are
+// known, so inches per pixel is solved. It does not fix POSITION: nothing in a
+// photograph says how high off the floor anything is. One known height closes
+// it, and after that every AFF the app reports from the photo is measured
+// rather than eyeballed.
+//
+//   AFF = oy - py/ppi   =>   oy = AFF + py/ppi
+const datumOy = (refBottomPy, ppi, aff) =>
+  (ppi > 0 && isFinite(refBottomPy) && isFinite(aff)) ? aff + refBottomPy / ppi : null;
 
 // Where the TV that was tapped for scale now sits, in WALL INCHES. Kept in the
 // image's own pixel space until asked for, so dragging the photo carries the
@@ -2556,6 +2570,25 @@ const runSelfTests = () => {
            existingTvInWall({ ...u, ppi: 0 }) === null;
   })());
 
+  T("rectify", "one known height places the photo exactly", (() => {
+    // A door tapped in a photo: 80" tall, its bottom on the floor. After the
+    // datum is applied the door's own bottom must read 0" AFF and its top 80",
+    // and a TV 40" up the same photo must read 40" — that is the whole claim.
+    const ppi = 8;
+    const refPx = { x: 100, y: 220, w: 32 * ppi, h: 80 * ppi };
+    const oy = datumOy(refPx.y + refPx.h, ppi, 0);
+    if (oy == null) return false;
+    const affOf = (py) => oy - py / ppi;
+    const doorBtm = affOf(refPx.y + refPx.h), doorTop = affOf(refPx.y);
+    // something whose bottom sits 40" up the wall, i.e. 40*ppi px above the door foot
+    const tvBtm = affOf(refPx.y + refPx.h - 40 * ppi);
+    // and the same door declared to start 6" up (a slab on a raised sill)
+    const oy6 = datumOy(refPx.y + refPx.h, ppi, 6);
+    return approx(doorBtm, 0) && approx(doorTop, 80) && approx(tvBtm, 40)
+        && approx(oy6 - oy, 6)
+        && datumOy(100, 0, 0) === null && datumOy(100, 8, NaN) === null;
+  })());
+
   // ---- spoken / typed quick entry ----
   T("spoken", "length: ten foot / 8 foot 6 / seventy-five / 6 1/2 / minus 6", (() => (
     approx(parseLenLoose("ten foot"), 120) && approx(parseLenLoose("8 foot 6"), 102) &&
@@ -4095,6 +4128,7 @@ export default function App() {
   // land invisible on the export sheet. Never rewrites the drawing on its own.
   const [exportAsk, setExportAsk] = useState(null);
   const [quadAsk, setQuadAsk] = useState(null); // four corners placed, pick the reference
+  const [datumAsk, setDatumAsk] = useState(null); // one known height, to place the photo vertically
   const [rectifying, setRectifying] = useState(false);
   const [sayAsk, setSayAsk] = useState(null);   // the input box
   const [heard, setHeard] = useState(null);     // the review card
@@ -5459,7 +5493,9 @@ ${sheetsHtml}
                   // ceiling. Copying that into the design would look like a real
                   // height and be nonsense, so refuse and say why.
                   if (exTvInfo.btm < 0 || exTvInfo.top > wallH) {
-                    setUnderlayNote(`The photo is not on the wall yet — that TV reads as ${fmt(exTvInfo.btm)} AFF. Drag it into place first (PDF ▾ → MOVE DRAWING).`);
+                    setUnderlayNote(underlay && underlay.datumAff != null
+                      ? `That TV reads as ${fmt(exTvInfo.btm)} AFF, which does not fit a ${fmt(wallH)} wall. Check the height you set, or the wall height.`
+                      : `The photo has no measured height yet — that TV reads as ${fmt(exTvInfo.btm)} AFF. PDF ▾ → SET THE HEIGHT, or drag it into place.`);
                     return;
                   }
                   // heightRef and the override are set together, so there is
@@ -5485,7 +5521,11 @@ ${sheetsHtml}
           </div>
         )}
       </div>
-      <div className="hint">Positions come from where the photo currently sits. Drag it onto the wall first, then MATCH IT.</div>
+      <div className="hint">
+        {underlay && underlay.datumAff != null
+          ? `Heights are measured — the photo is pinned at ${fmt(underlay.datumAff)} above the floor.`
+          : "Heights here are approximate: the photo has no measured height yet. PDF ▾ → SET THE HEIGHT."}
+      </div>
     </div>
   );
 
@@ -5852,6 +5892,11 @@ ${sheetsHtml}
                   <button className="menu-item" onClick={() => { setShowPdfMenu(false); startCalib("quad"); }}>
                     SQUARE UP A PHOTO<span className="menu-sub">tap four corners of something known — removes the perspective</span>
                   </button>
+                  {underlay.refPx && (
+                    <button className="menu-item" onClick={() => { setShowPdfMenu(false); setDatumAsk({ what: underlay.refWhat || "the reference", aff: underlay.datumAff != null ? String(underlay.datumAff) : "", known: false, hint: "Bottom edge above the finished floor — 0 for something standing on it." }); }}>
+                      SET THE HEIGHT<span className="menu-sub">{underlay.datumAff != null ? `set from ${fmt(underlay.datumAff)} AFF — change it` : "place the photo vertically from one measurement"}</span>
+                    </button>
+                  )}
                   <button className="menu-item" onClick={() => { setShowPdfMenu(false); startCalib("box"); }}>
                     SNAP TO TV<span className="menu-sub">box the drawn panel — scales and positions at once</span>
                   </button>
@@ -5935,8 +5980,12 @@ ${sheetsHtml}
       // time, so dragging the photo into place carries the ghost with it — and
       // the photo has to be dragged into place anyway.
       const existingTv = exTv ? { ...exTv, px: { x: plan.refPx.x, y: plan.refPx.y, w: plan.refPx.w, h: plan.refPx.h } } : null;
+      // Keep the reference rectangle itself: it is the anchor the vertical datum
+      // is applied against, and the datum can be set (or corrected) later.
+      const refPx = { x: plan.refPx.x, y: plan.refPx.y, w: plan.refPx.w, h: plan.refPx.h };
       setUnderlay(cur => cur && ({ ...cur, src: out.src, natW: out.natW, natH: out.natH,
-                                   ppi: plan.ppi, ox, oy, crop: null, rectified: true, existingTv }));
+                                   ppi: plan.ppi, ox, oy, crop: null, rectified: true,
+                                   existingTv, refPx, refWhat: what, datumAff: null }));
       const photoW = out.natW / plan.ppi;
       const wallNotes = [];
       // The photo now has a true width. If it disagrees wildly with the wall you
@@ -5944,8 +5993,15 @@ ${sheetsHtml}
       // way — which is exactly when to say something.
       if (photoW > safeW * 2.2) wallNotes.push(`That photo is about ${fmt(photoW)} across but the wall is set to ${fmt(safeW)} — check the wall width, or that you tapped the right object.`);
       else if (photoW < safeW * 0.45) wallNotes.push(`That photo is only about ${fmt(photoW)} across against a ${fmt(safeW)} wall — it may be a detail shot rather than the whole wall.`);
-      setUnderlayNote([`Squared up from ${what}. Scale is now true — drag to position it.`,
+      const ref = RECTIFY_REFS.find(x => x.key === refKey);
+      const known = ref && ref.floorAff != null;
+      setUnderlayNote([`Squared up from ${what}. Scale is now true.`,
                        ...checks.notes, ...wallNotes].join(" "));
+      // Offer the datum immediately: it is one number, and without it every
+      // height the photo implies is a guess dressed up as a measurement.
+      setDatumAsk({ what, aff: known ? "0" : "", known: !!known,
+                    hint: known ? "A door sits on the floor, so this is 0 — accept it and the photo lands exactly."
+                                : "Measure the bottom edge of what you tapped, above the finished floor." });
     } catch (err) {
       setUnderlayNote(`Could not square that photo up: ${err && err.message ? err.message : err}`);
     } finally {
@@ -5953,6 +6009,48 @@ ${sheetsHtml}
       setQuadAsk(null); setCalib(null); calibPtsRef.current = [];
     }
   };
+
+  const applyDatum = (raw) => {
+    const u = underlay;
+    if (!u || !u.refPx) return;
+    const aff = parseLenIn(raw);
+    // 0 is a legitimate answer — a door on the floor — and parseLenIn rejects it
+    // by design, so accept a literal zero before falling back to the parser.
+    const v = /^\s*0(\.0+)?\s*"?\s*$/.test(String(raw)) ? 0 : aff;
+    if (!isFinite(v) || v < 0 || v > 200) {
+      setUnderlayNote(`"${raw}" is not a height I can use. Give the bottom edge above the floor — 0 for something standing on it.`);
+      return;
+    }
+    const oy = datumOy(u.refPx.y + u.refPx.h, u.ppi, v);
+    if (oy == null) return;
+    setUnderlay(cur => cur && ({ ...cur, oy, datumAff: v }));
+    setDatumAsk(null);
+    setUnderlayNote(`Height set from ${u.refWhat} at ${fmt(v)} above the floor. Every AFF the photo implies is now measured, not eyeballed.`);
+  };
+
+  const datumDialog = datumAsk && (
+    <div className="ask-wrap" onClick={() => setDatumAsk(null)}>
+      <div className="ask" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="rec-tag">HOW HIGH IS IT?</div>
+        <div className="hint" style={{ marginBottom: 10 }}>
+          Squaring the photo fixed its <strong>scale</strong>. Nothing in a photograph says how high off
+          the floor anything is, so one measurement fixes its <strong>position</strong> — and after that
+          every height the app reads off the photo is measured rather than eyeballed.
+        </div>
+        <Field label={`Bottom edge of ${datumAsk.what}, above finished floor`}>
+          <input className="inp" autoFocus type="text" placeholder={`e.g. 0, 24 or 2' 6"`}
+                 value={datumAsk.aff}
+                 onChange={e => setDatumAsk(a => ({ ...a, aff: e.target.value }))}
+                 onKeyDown={e => { if (e.key === "Enter") applyDatum(datumAsk.aff); else if (e.key === "Escape") setDatumAsk(null); }}/>
+        </Field>
+        <div className="hint">{datumAsk.hint}</div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+          <button className="btn ghost" onClick={() => { setDatumAsk(null); setUnderlayNote("Height not set — drag the photo onto the wall by eye (PDF ▾ → MOVE DRAWING). Heights read off it are approximate until you set one."); }}>SKIP</button>
+          <button className="btn" disabled={datumAsk.aff === ""} onClick={() => applyDatum(datumAsk.aff)}>SET HEIGHT</button>
+        </div>
+      </div>
+    </div>
+  );
 
   const quadDialog = quadAsk && (
     <div className="ask-wrap" onClick={() => { if (!rectifying) { setQuadAsk(null); setCalib(null); calibPtsRef.current = []; } }}>
@@ -6680,6 +6778,7 @@ ${sheetsHtml}
           {sayDialog}
           {heardDialog}
           {quadDialog}
+          {datumDialog}
           {statusBar}
           {isMobile && <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>{startBtns}{exportBtns}</div>}
         </main>
