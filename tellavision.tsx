@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.8.0";
+const APP_VERSION = "2.9.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -2246,6 +2246,41 @@ const runSelfTests = () => {
       a.texts.join("|") === c.texts.join("|");
   })());
 
+  // Same reasoning as the theme invariant: the sweep renders one tick state, and
+  // that is only safe while ticking cannot move a label. The box is always drawn
+  // and the check mark lives inside it, so this should hold by construction —
+  // which is exactly the kind of "should" worth pinning.
+  T("invariant", "Tape ticks change ink only, never geometry", (() => {
+    const base = {
+      wallW: 120, wallH: 108, hasFireplace: false, fbOpeningW: 40, fbOpeningH: 30, fbOffsetIn: 0,
+      hasMantel: false, mantelH: 54, mantelDepth: 8, brand: "Sony", selectedSize: 65,
+      mountSystem: "sanus", dispUnits: "ftin", heightRef: "center", showVesa: true,
+      showOutlet: true, showLowVolt: true, showBoxDims: true, showTvDims: true,
+      showTapeOut: true, showTravel: true, travelIn: 1.5, fullWords: true, textScale: 1.3,
+      view: "tapeout", isMobile: false, isTablet: false, viewportW: 1280,
+    };
+    const layout = computeLayout({
+      selectedSize: 65, brand: "Sony", centerH: 42, tvCL: 60, showBackBox: true,
+      effectiveBoxModel: recommendBackBox(65, "sanus", "Sony"), mountSystem: "sanus",
+      sanusMount: recommendSanusMount(65, "fixed", "Sony"),
+    });
+    const geom = (ticks) => {
+      const schem = buildSchematic({ ...base, layout, tapeTicks: ticks }, SCREEN_PALETTE);
+      const out = [];
+      const walk = (n) => {
+        if (!n || typeof n !== "object") return;
+        if (Array.isArray(n)) return n.forEach(walk);
+        if (n.type === "text") out.push(`${n.props.x},${n.props.y},${n.props.fontSize}`);
+        if (n.props && n.props.children) walk(n.props.children);
+      };
+      walk(schem.elements);
+      return `${schem.svgW}x${schem.svgH}|${out.join("|")}`;
+    };
+    const none = geom({});
+    const all = geom({ top: true, btm: true, left: true, right: true });
+    return none.length > 40 && none === all;
+  })());
+
   // ---- spoken / typed quick entry ----
   T("spoken", "length: ten foot / 8 foot 6 / seventy-five / 6 1/2 / minus 6", (() => (
     approx(parseLenLoose("ten foot"), 120) && approx(parseLenLoose("8 foot 6"), 102) &&
@@ -2998,20 +3033,33 @@ const buildSchematic = (S, BASE_P) => {
     if (vTape) {
       const tTop = floorY - layout.tvTop * scale;
       const tBtm = floorY - layout.tvBottom * scale;
-      [["t-top", tTop, `TOP ${fmt(layout.tvTop)} ${W.AFF}`], ["t-btm", tBtm, `${W.BTM} ${fmt(layout.tvBottom)} ${W.AFF}`]].forEach(([id, y, txt]) => {
+      // A tick box per line. On screen it mirrors what you have already snapped;
+      // on paper it is always EMPTY, because the printed sheet is ticked with a
+      // pen by whoever is holding the tape, not by whoever generated the PDF.
+      const ticks = S.forPrint ? {} : (S.tapeTicks || {});
+      const BS = FS(9);
+      const tickBox = (id, x, y, done) => {
+        const els = [<rect key={K(`${id}-tb`)} x={x} y={y} width={BS} height={BS} rx="1.5"
+                           fill="none" stroke={P.tape} strokeWidth="1.1" opacity={done ? 1 : 0.75}/>];
+        if (done) els.push(<path key={K(`${id}-tk`)} d={`M${x + BS * 0.22} ${y + BS * 0.54} L${x + BS * 0.42} ${y + BS * 0.76} L${x + BS * 0.8} ${y + BS * 0.24}`}
+                                 fill="none" stroke={P.tape} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>);
+        return els;
+      };
+      [["t-top", "top", tTop, `TOP ${fmt(layout.tvTop)} ${W.AFF}`], ["t-btm", "btm", tBtm, `${W.BTM} ${fmt(layout.tvBottom)} ${W.AFF}`]].forEach(([id, tk, y, txt]) => {
         elements.push(<line key={K(id)} x1={wallX + 2} y1={y} x2={wallX + wallPxW - 2} y2={y} stroke={P.tape} strokeWidth="1.2" strokeDasharray="10 5" opacity="0.95"/>);
-        const w = textW(txt, FS(10)) + 10;
+        const w = textW(txt, FS(10)) + 15 + BS;
         elements.push(<rect key={K(`${id}-bg`)} x={wallX + 6} y={y - FS(14)} width={w} height={FS(13)} fill={P.halo} rx="2"/>);
-        elements.push(<text key={K(`${id}-t`)} x={wallX + 11} y={y - FS(4)} fill={P.tape} fontSize={FS(10)} fontWeight="700" fontFamily="'IBM Plex Mono', monospace">{txt}</text>);
+        tickBox(id, wallX + 10, y - FS(12.5), !!ticks[tk]).forEach(e => elements.push(e));
+        elements.push(<text key={K(`${id}-t`)} x={wallX + 14 + BS} y={y - FS(4)} fill={P.tape} fontSize={FS(10)} fontWeight="700" fontFamily="'IBM Plex Mono', monospace" opacity={ticks[tk] ? 0.55 : 1}>{txt}</text>);
       });
       // The vertical tape labels tuck INWARD from their lines rather than
       // centring on them: a centred right-edge label bleeds into the callout
       // rail, which starts just 16px beyond the TV. On a narrow TV the two
       // would then meet in the middle, so when the span cannot hold both they
       // stagger vertically instead — the usual CAD answer to a tight dimension.
-      const tapeV = [["t-l", layout.tvLeft, 1], ["t-r", layout.tvRight, -1]].map(([id, v, dir]) => {
+      const tapeV = [["t-l", "left", layout.tvLeft, 1], ["t-r", "right", layout.tvRight, -1]].map(([id, tk, v, dir]) => {
         const txt = fmt(v);
-        return { id, v, dir, txt, x: wallX + v * scale, w: textW(txt, FS(10)) + 10 };
+        return { id, tk, v, dir, txt, x: wallX + v * scale, w: textW(txt, FS(10)) + 15 + BS };
       });
       const [tL, tR] = tapeV;
       const tight = (tR.x - 4 - tR.w) < (tL.x + 4 + tL.w);
@@ -3020,9 +3068,10 @@ const buildSchematic = (S, BASE_P) => {
         const row = tight && i === 1 ? FS(13) + 3 : 0;          // drop the right one a line
         const bx = e.dir > 0 ? e.x + 4 : e.x - 4 - e.w;
         elements.push(<rect key={K(`${e.id}-bg`)} x={bx} y={floorY - FS(24) + row} width={e.w} height={FS(13)} fill={P.halo} rx="2"/>);
-        elements.push(<text key={K(`${e.id}-t`)} x={e.dir > 0 ? e.x + 9 : e.x - 9} y={floorY - FS(14) + row}
+        tickBox(e.id, bx + 4, floorY - FS(22.5) + row, !!ticks[e.tk]).forEach(x => elements.push(x));
+        elements.push(<text key={K(`${e.id}-t`)} x={e.dir > 0 ? e.x + 13 + BS : e.x - 9} y={floorY - FS(14) + row}
           textAnchor={e.dir > 0 ? "start" : "end"} fill={P.tape} fontSize={FS(10)} fontWeight="700"
-          fontFamily="'IBM Plex Mono', monospace">{e.txt}</text>);
+          fontFamily="'IBM Plex Mono', monospace" opacity={ticks[e.tk] ? 0.55 : 1}>{e.txt}</text>);
       });
     }
   }
@@ -3639,6 +3688,7 @@ export default function App() {
   const [multiPagePdf, setMultiPagePdf] = useState(SAVED.multiPagePdf ?? true);
   const [theme, setTheme] = useState(THEMES[SAVED.theme] ? SAVED.theme : "dark");
   const [density, setDensity] = useState(DENSITIES[SAVED.density] ? SAVED.density : "comfortable");
+  const [tapeTicks, setTapeTicks] = useState(SAVED.tapeTicks && typeof SAVED.tapeTicks === "object" ? SAVED.tapeTicks : {});
   const [stage, setStage] = useState(SAVED.stage || "start");
   const stageOn = (id) => stage === "all" || stage === id;
   const pickStage = (id) => setStage(cur => (cur === id ? cur : id));
@@ -3757,7 +3807,7 @@ export default function App() {
         showBackBox, backBoxModel, autoRecommendBox, showOutlet,
         showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
         bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes,
-        projectName, clientName, revision, dispUnits, multiPagePdf, theme, density, stage,
+        projectName, clientName, revision, dispUnits, multiPagePdf, theme, density, stage, tapeTicks,
       }));
     } catch { /* storage unavailable — run without persistence */ }
   }, [markup, mkColor, mkWidth, trace, snapOn, textScale, view, underlay,
@@ -3767,7 +3817,7 @@ export default function App() {
       showBackBox, backBoxModel, autoRecommendBox, showOutlet,
       showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel,
       bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes,
-      projectName, clientName, revision, dispUnits, multiPagePdf, theme, density, stage]);
+      projectName, clientName, revision, dispUnits, multiPagePdf, theme, density, stage, tapeTicks]);
 
   const resetAll = () => {
     try { window.localStorage.removeItem(STORAGE_KEY); window.localStorage.removeItem(LEGACY_STORAGE_KEY); } catch {}
@@ -3838,14 +3888,15 @@ export default function App() {
     showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut,
     showTravel, travelIn, fullWords, projectName, clientName, revision,
     dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale, view,
+    tapeTicks,
   };
   const themePalette = THEMES[theme] ? THEMES[theme].palette : SCREEN_PALETTE;
   const screenSchem = useMemo(() => buildSchematic(schemState, themePalette),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt,
      showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords,
-     projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale, view, theme]);
-  const printSchem = useMemo(() => buildSchematic({ ...schemState, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE),
+     projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale, view, theme, tapeTicks]);
+  const printSchem = useMemo(() => buildSchematic({ ...schemState, forPrint: true, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE),
     [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth,
      brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt,
      showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords,
@@ -4370,7 +4421,7 @@ export default function App() {
   // buildSchematic is pure, so each sheet renders into a throwaway root and is
   // read back — the same offscreen technique the stress sweep uses.
   const renderViewSvg = (viewKey) => {
-    const schem = buildSchematic({ ...schemState, view: viewKey, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE);
+    const schem = buildSchematic({ ...schemState, view: viewKey, forPrint: true, isMobile: false, isTablet: false, viewportW: 1280 }, PRINT_PALETTE);
     const host = document.createElement("div");
     host.style.cssText = "position:absolute;left:-100000px;top:0;";
     document.body.appendChild(host);
@@ -4995,6 +5046,30 @@ ${sheetsHtml}
           <div key={a} className="legend-row"><span className="legend-abbr">{a}</span><span>{full}</span></div>
         ))}
       </div>
+    </div>
+  );
+
+  // Shown only in the Tape-out view: the four numbers you snap on the wall, in
+  // the order you snap them, tickable with a glove on. Ticking dims the label on
+  // the drawing so what is left to do is what still reads at full strength.
+  const tapeChecklist = view === "tapeout" && layout && (
+    <div className="tape-list">
+      <div className="tape-head">
+        <span className="rec-tag" style={{ margin: 0 }}>TAPE-OUT CHECKLIST</span>
+        <button type="button" className="chip" onClick={() => setTapeTicks({})}
+                disabled={!Object.values(tapeTicks).some(Boolean)}>RESET</button>
+      </div>
+      <div className="tape-rows">
+        {[["top", `TOP ${fmt(layout.tvTop)} AFF`], ["btm", `BOTTOM ${fmt(layout.tvBottom)} AFF`],
+          ["left", `LEFT ${fmt(layout.tvLeft)} from left wall`], ["right", `RIGHT ${fmt(layout.tvRight)} from left wall`]].map(([k, txt]) => (
+          <button type="button" key={k} className={`tape-row ${tapeTicks[k] ? "on" : ""}`}
+                  onClick={() => setTapeTicks(t => ({ ...t, [k]: !t[k] }))}>
+            <span className={`chk ${tapeTicks[k] ? "on" : ""}`}>{tapeTicks[k] ? <Icon name="check" size={11}/> : null}</span>
+            <span>{txt}</span>
+          </button>
+        ))}
+      </div>
+      <div className="hint">Ticks stay with the job on this device. The printed sheet always prints empty boxes.</div>
     </div>
   );
 
@@ -5817,6 +5892,15 @@ ${sheetsHtml}
           .mk-bar::-webkit-scrollbar { display: none; }
           .mk-bar > * { flex: 0 0 auto; }
         }
+        .tape-list { border: 1px solid var(--line2); border-radius: 6px; padding: var(--sp-2) var(--sp-3); background: var(--ink2); }
+        .tape-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-1); }
+        .tape-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-1); }
+        .tape-row { display: flex; align-items: center; gap: 10px; min-height: var(--tap); padding: 0 var(--sp-2);
+                    background: transparent; border: 1px solid var(--line); border-radius: 5px; cursor: pointer;
+                    color: var(--txt); font-family: var(--fm); font-size: var(--fs-stat); text-align: left; }
+        .tape-row:hover { border-color: var(--acc); }
+        .tape-row.on { color: var(--txt3); border-color: var(--line); }
+        .tape-row.on span:last-child { text-decoration: line-through; }
         .stg { border-bottom: 1px solid var(--line); }
         .stg:last-of-type { border-bottom: none; }
         .stg-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--tap);
@@ -6005,6 +6089,7 @@ ${sheetsHtml}
           {sizeStrip}
           {legendPanel}
           {canvas}
+          {tapeChecklist}
           {askDialog}
           {inkDialog}
           {sayDialog}

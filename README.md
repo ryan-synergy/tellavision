@@ -86,6 +86,13 @@ It is a deterministic grammar, not a model: it runs in any browser and in the
 Simulator, needs no Apple Intelligence hardware, and is pinned by 14 self-tests.
 Dictation is an input method, not a feature — there is no speech code in the app.
 
+**Tape-out is a checklist.** In the Tape-out view the four numbers you snap on
+the wall get tick boxes — on the drawing and in a panel below it. Ticking dims
+that label so what still reads at full strength is what is left to do. Ticks
+stay with the job on the device but are never exported: **the printed sheet
+always prints empty boxes**, because the person holding the tape ticks them with
+a pen.
+
 **One stage at a time.** The sidebar is a stepper — START, THE WALL, THE TV,
 THE HARDWARE. Only the stage you are working in shows its controls; the others
 collapse to a row carrying their summary (`120" × 108" · fireplace`, `Sony 75"`)
