@@ -13,7 +13,9 @@ It runs entirely in the browser. No build step, no server, no account, and no
 CDN — React and pdf.js are vendored, so it works with the network off. Open the
 page on a laptop or an iPad on site and it just works.
 
-An iPhone/iPad app shell lives in [`ios/`](ios/README.md).
+An iPhone/iPad app lives in [`ios/`](ios/README.md) — it builds, installs and
+runs today. [Privacy policy](https://ryan-synergy.github.io/tellavision/privacy.html)
+· [Support](https://ryan-synergy.github.io/tellavision/support.html)
 
 ---
 
