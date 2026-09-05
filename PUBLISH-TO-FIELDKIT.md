@@ -73,6 +73,12 @@ URL won't match the name. Prefer Pages-on-this-repo.)
   spacing tighten; tap targets do NOT shrink — 44pt holds in both.
 - Sidebar shows one stage at a time, collapsed stages carry a live summary
   (`120.0" × 108.0"`, `Sony 75"`), and `ALL SECTIONS` expands everything.
+- `IMPORT ▾ → DESCRIBE IT`, paste *wall is ten foot wide, eight foot ceiling,
+  seventy-five inch Sony, mantel at fifty-four* → the review card lists 7 values;
+  APPLY sets a 120 × 96 wall, Sony 75", fireplace + mantel at 54.
+- `DESCRIBE IT` with *mantel at five three* must refuse it as ambiguous, and
+  *wall ten wide* must report the value as out of range. Neither may apply
+  silently — the whole point of the confirm step.
 - EXPORT → FULL PACK produces a JSON download, a DXF download, and opens the
   PDF print window.
 - Mobile width shows the SETUP / DRAWING / SPECS tabs.
@@ -372,6 +378,14 @@ is too narrow to hold both side by side.
   manufacturer spec sheets supplied by Ryan — never invent SKU specs. Sony 115
   has NO VESA entry on purpose (unpublished); add it only from a real sheet.
 - After ANY schematic change, rerun SWEEP and keep it at 0 failures.
+- **Spoken/typed entry never writes state directly.** `parseUtterance` is pure
+  and emits the same `{ fields, matched, ignored, notes }` shape as
+  `extractImportedDesign`, so `applyImport` stays the single validated path in —
+  it carries the catalog size snap, the enum whitelists and the range guards.
+  A new field means teaching the parser to emit it, not adding a setter call.
+  `parseLenIn` is deliberately untouched: it is anchored, rejects zero and
+  negatives, and has a live call site in two-point calibration. `parseLenLoose`
+  is its phrase-scanning sibling.
 - **Markup colour resolves at RENDER time, never on the stored stroke.**
   `color: "auto"` is what goes to localStorage and to exported JSON;
   `resolveMarkupColor` turns it into the palette's `line` inside

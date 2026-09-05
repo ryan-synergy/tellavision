@@ -61,6 +61,31 @@ and the DXF always describe the whole job, so no sheet can understate the scope.
 Tape-out and Mount draw their own guides even when those are switched off in
 Settings.
 
+**Describe it instead of filling it in.** `IMPORT ▾ → DESCRIBE IT`, or the
+*Describe it* card on the start panel. Type — or dictate, using the keyboard's
+own mic — what you measured:
+
+> wall is ten foot wide, eight foot ceiling, seventy-five inch Sony, mantel at fifty-four
+
+It reads wall, fireplace and mantel, TV brand and size, heights and offsets, and
+project/client. Mount and back box are deliberately left to the recommendation
+engine, which already checks VESA and capacity limits.
+
+**Nothing is applied until you confirm it.** The parse is shown as a checklist —
+each value against the phrase that produced it, in your display units — and you
+drop any row before it lands. This is a measurement tool for finished homes: a
+misheard number is a hole in the wrong place. Two guards matter especially:
+
+- *"five three"* and *"fifty three"* are one word and 48 inches apart. Two bare
+  numbers with no unit between them are refused as ambiguous rather than
+  resolved, with a note telling you which unit to say.
+- A value outside the plausible range (`wall ten wide` → 10") is reported, not
+  silently dropped — because you almost certainly meant ten feet.
+
+It is a deterministic grammar, not a model: it runs in any browser and in the
+Simulator, needs no Apple Intelligence hardware, and is pinned by 14 self-tests.
+Dictation is an input method, not a feature — there is no speech code in the app.
+
 **One stage at a time.** The sidebar is a stepper — START, THE WALL, THE TV,
 THE HARDWARE. Only the stage you are working in shows its controls; the others
 collapse to a row carrying their summary (`120" × 108" · fireplace`, `Sony 75"`)

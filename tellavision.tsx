@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.7.0";
+const APP_VERSION = "2.8.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -589,6 +589,191 @@ const parseLenIn = (raw) => {
   const frac = m[3] && m[4] && parseFloat(m[4]) ? parseFloat(m[3]) / parseFloat(m[4]) : 0;
   const v = ft * 12 + inch + frac;
   return v > 0 ? v : NaN;
+};
+
+// ── Spoken / typed quick entry ───────────────────────────────────────────────
+// A deterministic grammar, not a model. It runs in the browser and the
+// Simulator, needs no Apple Intelligence hardware, and — the point — can be
+// pinned by the same self-tests as everything else here. Dictation is just an
+// input method: the keyboard mic types into the same box.
+//
+// NOTHING here writes state. parseUtterance emits exactly the shape
+// extractImportedDesign does, so applyImport stays the single validated path in
+// and the review card gets the matched[] prose for free.
+
+const NUM_WORDS = {
+  zero:0, one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9,
+  ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15, sixteen:16,
+  seventeen:17, eighteen:18, nineteen:19, twenty:20, thirty:30, forty:40, fifty:50,
+  sixty:60, seventy:70, eighty:80, ninety:90,
+};
+
+// Speech gives words; the grammar wants digits. "seventy-five" -> 75,
+// "a hundred and twenty" -> 120. Deliberately small: this covers the numbers a
+// tape measure produces, and anything it cannot fold is left for the review
+// card to show as unparsed rather than guessed at.
+const wordsToDigits = (str) => {
+  let t = String(str).toLowerCase().replace(/[–—]/g, "-").replace(/’/g, "'").replace(/”/g, '"');
+  t = t.replace(/\b(?:and\s+)?(?:a|one)\s+half\b/g, " and 1/2");
+  t = t.replace(/\b(?:and\s+)?(?:a|one)\s+quarter\b/g, " and 1/4");
+  t = t.replace(/\ba\s+hundred\b/g, "one hundred");
+  t = t.replace(/(\b[a-z]+)-([a-z]+\b)/g, (m, a, b) =>
+    (NUM_WORDS[a] !== undefined && NUM_WORDS[b] !== undefined) ? `${a} ${b}` : m);
+  const tok = t.split(/\s+/);
+  const out = [];
+  let acc = null;
+  const flush = () => { if (acc !== null) { out.push(String(acc)); acc = null; } };
+  for (let i = 0; i < tok.length; i++) {
+    const w = tok[i].replace(/[^a-z0-9./'"-]/g, "");
+    if (NUM_WORDS[w] !== undefined) {
+      const v = NUM_WORDS[w];
+      if (acc === null) acc = v;
+      else if (acc % 100 === 0 && v < 100) acc += v;          // hundred + twenty
+      else if (acc >= 20 && acc % 10 === 0 && v < 10) acc += v; // seventy + five
+      else { flush(); acc = v; }
+    } else if (w === "hundred") {
+      acc = (acc === null ? 1 : acc) * 100;
+    } else if (w === "and" && acc !== null && acc % 100 === 0) {
+      // "a hundred and twenty" — keep accumulating
+    } else {
+      flush();
+      out.push(tok[i]);
+    }
+  }
+  flush();
+  return out.join(" ");
+};
+
+// A length ANYWHERE in a phrase. parseLenIn stays untouched: it is anchored,
+// rejects zero and negatives, has its own self-test and a live call site in the
+// two-point calibration. This is its loose sibling.
+const LEN_RE = new RegExp(
+  "(-|minus\\s+)?" +
+  "(?:(\\d+(?:\\.\\d+)?)\\s*(?:feet|foot|ft|')" +
+  "(?:\\s*(?:and\\s+)?(\\d+(?:\\.\\d+)?)\\s*(?:inches|inch|in\\b|\")?)?" +
+  "(?:\\s*(?:and\\s+)?(\\d+)\\s*/\\s*(\\d+))?" +
+  "(?:\\s*and\\s+(?:one\\s+)?half)?" +
+  "|(\\d+(?:\\.\\d+)?)\\s*(?:inches|inch|in\\b|\")?" +
+  "(?:\\s*(?:and\\s+)?(\\d+)\\s*/\\s*(\\d+))?" +
+  "(?:\\s*and\\s+(?:one\\s+)?half)?)", "i");
+
+const parseLenLoose = (raw) => {
+  if (raw == null) return NaN;
+  const t = wordsToDigits(raw);
+  const m = t.match(LEN_RE);
+  if (!m) return NaN;
+  const neg = !!m[1];
+  let v;
+  if (m[2] !== undefined) {
+    v = parseFloat(m[2]) * 12 + (m[3] ? parseFloat(m[3]) : 0)
+      + (m[4] && m[5] && +m[5] ? +m[4] / +m[5] : 0);
+  } else if (m[6] !== undefined) {
+    v = parseFloat(m[6]) + (m[7] && m[8] && +m[8] ? +m[7] / +m[8] : 0);
+  } else return NaN;
+  if (!isFinite(v)) return NaN;
+  return neg ? -v : v;
+};
+
+// Field -> human label, used by the review card and the matched[] prose.
+const SPOKEN_LABELS = {
+  wallW: "Wall width", wallH: "Wall height", brand: "Brand", selectedSize: "TV size",
+  hasFireplace: "Fireplace", hasMantel: "Mantel", mantelH: "Mantel height",
+  fbOpeningW: "Firebox width", fbOpeningH: "Firebox height",
+  mountHeightOverride: "Mount height", heightRef: "Measured from",
+  tvOffsetX: "Offset from wall centre", projectName: "Project", clientName: "Client",
+};
+
+// Same ranges extractImportedDesign enforces. A value outside them is NOT
+// silently dropped: it becomes a note, because "ten" for a wall almost always
+// means ten feet, and saying so is more useful than saying nothing.
+const SPOKEN_RANGE = {
+  wallW: [24, 600], wallH: [24, 300], selectedSize: [18, 130],
+  mantelH: [20, 90], fbOpeningW: [10, 200], fbOpeningH: [10, 100],
+  mountHeightOverride: [12, 200],
+};
+
+const parseUtterance = (raw) => {
+  const out = { fields: {}, matched: [], ignored: 0, notes: [], native: false, transcript: String(raw || "") };
+  const src = String(raw || "").trim();
+  if (!src) { out.notes.push("Nothing to read"); return out; }
+
+  const set = (key, val, phrase) => {
+    if (out.fields[key] !== undefined) return;
+    const rng = SPOKEN_RANGE[key];
+    const n = typeof val === "string" && rng ? parseFloat(val) : val;
+    if (rng && typeof n === "number") {
+      if (!isFinite(n) || n < rng[0] || n > rng[1]) {
+        out.notes.push(`"${phrase}" → ${SPOKEN_LABELS[key] || key} ${fmtIn(n)} is outside ${rng[0]}–${rng[1]}"; ignored. Say the unit ("ten foot") if you meant feet.`);
+        out.ignored++;
+        return;
+      }
+    }
+    out.fields[key] = val;
+    out.matched.push(`${SPOKEN_LABELS[key] || key}: ${typeof val === "boolean" ? (val ? "yes" : "no") : val}`);
+  };
+  // Height reference and the override are always set together. Setting
+  // heightRef alone is what switchHeightRef exists to guard — it converts the
+  // existing override so the TV does not move. Here both are stated, so there
+  // is nothing to convert.
+  const setHeight = (val, ref, phrase) => { set("mountHeightOverride", String(val), phrase); if (out.fields.mountHeightOverride !== undefined) out.fields.heightRef = ref; };
+
+  const clauses = src
+    .split(/[,;]|\band\b(?!\s+(?:a|one)\s+(?:half|quarter))(?!\s*\d+\s*\/\s*\d)|\bthen\b/i)
+    .map(c => c.trim().replace(/\.$/, "")).filter(Boolean);
+  const L = "([-\\d./'\"a-z ]*?\\d[\\d./'\"]*\\s*(?:feet|foot|ft|inches|inch|in|'|\")?(?:\\s*\\d+\\s*/\\s*\\d+)?)";
+
+  clauses.forEach(clause => {
+    const c = wordsToDigits(clause);
+    // "five three" is 5'3" to a person and "5 3" to the parser, one word away
+    // from "fifty three" and 48 inches from it. Two bare numbers with no unit
+    // between them is genuinely ambiguous, and a measurement tool must say so
+    // rather than pick one — a wrong number here is a hole in a finished wall.
+    if (/\b\d+\s+\d+\b/.test(c) && !/\d+\s*(?:feet|foot|ft|'|inches|inch|in\b|")\s*\d/.test(c) && !/\d\s*\/\s*\d/.test(c)) {
+      out.notes.push(`"${clause}" is ambiguous — say the unit, e.g. "five foot three" or "fifty three".`);
+      out.ignored++;
+      return;
+    }
+    let m, hit = false;
+    const H = (re, fn) => { if (hit) return; m = c.match(re); if (m) { hit = true; fn(m); } };
+    // HR matches the raw clause — wordsToDigits lowercases, which is right for
+    // numbers and wrong for a client's name.
+    const HR = (re, fn) => { if (hit) return; const mm = clause.match(re); if (mm) { hit = true; fn(mm); } };
+
+    H(/(?:wall|room)\b[^\d-]*?([\d.]+\s*(?:feet|foot|ft|'|inches|inch|in|")?)\s*(?:by|x|×)\s*([\d.]+\s*(?:feet|foot|ft|'|inches|inch|in|")?)/i,
+      (m) => { set("wallW", parseLenLoose(m[1]), clause); set("wallH", parseLenLoose(m[2]), clause); });
+    H(/\b(?:ceiling|ceilings)\b/i, () => { const v = parseLenLoose(c); if (isFinite(v)) set("wallH", v, clause); });
+    H(/\b(?:tall|high|height)\b/i, () => { const v = parseLenLoose(c); if (isFinite(v)) set("wallH", v, clause); });
+    H(/\b(?:wide|width|across)\b/i, () => { const v = parseLenLoose(c); if (isFinite(v)) set("wallW", v, clause); });
+    H(/\bno\s+fireplace\b/i, () => { out.fields.hasFireplace = false; out.matched.push("Fireplace: no"); });
+    H(/\bno\s+mantel\b/i, () => { out.fields.hasMantel = false; out.matched.push("Mantel: no"); });
+    H(/\bmantel\b/i, () => { const v = parseLenLoose(c); if (isFinite(v)) { set("mantelH", v, clause); out.fields.hasMantel = true; out.fields.hasFireplace = true; } else { out.fields.hasMantel = true; out.fields.hasFireplace = true; out.matched.push("Mantel: yes"); } });
+    H(/\b(?:firebox|opening)\b[^\d]*([\d.]+[^\d]*?)\s*(?:by|x|×)\s*([\d.]+[^\d]*)/i,
+      (m) => { set("fbOpeningW", parseLenLoose(m[1]), clause); set("fbOpeningH", parseLenLoose(m[2]), clause); out.fields.hasFireplace = true; });
+    H(/\bfire\s?(?:place|box)\b/i, () => { out.fields.hasFireplace = true; out.matched.push("Fireplace: yes"); });
+    H(/\b(?:bottom|bottoms)\b/i, () => { const v = parseLenLoose(c); if (isFinite(v)) setHeight(v, "bottom", clause); });
+    H(/\b(?:cent(?:er|re)|middle)\b/i, () => { const v = parseLenLoose(c); if (isFinite(v)) setHeight(v, "center", clause); });
+    H(/\b(?:shift|offset|over|moved?)\b[^a-z]*(left|right)/i, (m) => {
+      const v = parseLenLoose(c.replace(/\b(left|right)\b/i, ""));
+      if (isFinite(v)) { const sign = /left/i.test(m[1]) ? -1 : 1; out.fields.tvOffsetX = String(sign * Math.abs(v)); out.matched.push(`Offset from wall centre: ${fmtIn(sign * Math.abs(v))}`); }
+    });
+    HR(/\bproject\b\s*(?:is|:)?\s*(.+)/i, (m) => { const v = m[1].trim(); if (v) set("projectName", v.slice(0, 80), clause); });
+    HR(/\bclient\b\s*(?:is|:)?\s*(.+)/i, (m) => { const v = m[1].trim(); if (v) set("clientName", v.slice(0, 80), clause); });
+
+    // TV last: a bare "75 inch" should not outrank "wall 75 inches wide".
+    if (!hit) {
+      const b = BRANDS.find(x => new RegExp(`\\b${x}\\b`, "i").test(c));
+      const sz = c.match(/\b(\d{2,3})\s*(?:inch|inches|in\b|")/i) || c.match(/\b(\d{2,3})\b/);
+      if (b || sz) {
+        hit = true;
+        if (b) set("brand", b, clause);
+        if (sz) set("selectedSize", +sz[1], clause);
+      }
+    }
+    if (!hit) out.ignored++;
+  });
+
+  if (!out.matched.length) out.notes.push("Nothing recognised. Try: wall ten foot by eight foot, 75 inch Sony, mantel at 54.");
+  return out;
 };
 
 const underlayInW = (u) => u.natW / u.ppi;
@@ -2061,6 +2246,70 @@ const runSelfTests = () => {
       a.texts.join("|") === c.texts.join("|");
   })());
 
+  // ---- spoken / typed quick entry ----
+  T("spoken", "length: ten foot / 8 foot 6 / seventy-five / 6 1/2 / minus 6", (() => (
+    approx(parseLenLoose("ten foot"), 120) && approx(parseLenLoose("8 foot 6"), 102) &&
+    approx(parseLenLoose("seventy-five"), 75) && approx(parseLenLoose("6 1/2"), 6.5) &&
+    approx(parseLenLoose("minus 6"), -6) && approx(parseLenLoose(`5 foot 3 inches`), 63) &&
+    approx(parseLenLoose("a hundred and twenty"), 120) && isNaN(parseLenLoose("banana"))
+  ))(), ["ten foot","8 foot 6","seventy-five","6 1/2","minus 6","5 foot 3 inches","a hundred and twenty","banana"]
+       .map(x => `${x}=${parseLenLoose(x)}`).join(" "));
+  T("spoken", "half: sixty two and a half", approx(parseLenLoose("sixty two and a half"), 62.5),
+    `${parseLenLoose("sixty two and a half")}`);
+  T("spoken", "the whole sentence parses", (() => {
+    const r = parseUtterance("wall is ten foot wide, eight foot ceiling, seventy-five inch Sony, mantel at fifty-four");
+    const f = r.fields;
+    return f.wallW === 120 && f.wallH === 96 && f.selectedSize === 75 && f.brand === "Sony" &&
+           f.mantelH === 54 && f.hasMantel === true && f.hasFireplace === true;
+  })());
+  T("spoken", "wall 120 by 108", (() => {
+    const f = parseUtterance("wall 120 by 108").fields;
+    return f.wallW === 120 && f.wallH === 108;
+  })());
+  T("spoken", "brand + size both orders", (() => {
+    const a = parseUtterance("65 inch Samsung").fields, b = parseUtterance("Sony 85").fields;
+    return a.selectedSize === 65 && a.brand === "Samsung" && b.brand === "Sony" && b.selectedSize === 85;
+  })());
+  T("spoken", "no fireplace / no mantel set FALSE, not absent", (() => {
+    const f = parseUtterance("no fireplace").fields, g = parseUtterance("no mantel").fields;
+    return f.hasFireplace === false && g.hasMantel === false;
+  })());
+  T("spoken", "height ref and override always move together", (() => {
+    const b = parseUtterance("bottom at 30").fields, c = parseUtterance("center 62 and a half").fields;
+    return b.mountHeightOverride === "30" && b.heightRef === "bottom" &&
+           c.mountHeightOverride === "62.5" && c.heightRef === "center";
+  })());
+  T("spoken", "offset left is negative", parseUtterance("shift left 6").fields.tvOffsetX === "-6",
+    String(parseUtterance("shift left 6").fields.tvOffsetX));
+  T("spoken", "firebox 40 by 30 implies a fireplace", (() => {
+    const f = parseUtterance("firebox 40 by 30").fields;
+    return f.fbOpeningW === 40 && f.fbOpeningH === 30 && f.hasFireplace === true;
+  })());
+  T("spoken", "project and client names", (() => {
+    const f = parseUtterance("project Smith Residence, client R. Carter").fields;
+    return f.projectName === "Smith Residence" && f.clientName === "R. Carter";
+  })());
+  // The dictation hazards. "fifty three" and "five three" differ by one word and
+  // by 48 inches; the second is ambiguous and must NOT be silently resolved.
+  T("spoken", "fifty three != five three, and the ambiguous one is flagged", (() => {
+    const a = parseUtterance("mantel at fifty three");
+    const b = parseUtterance("mantel at five three");
+    return a.fields.mantelH === 53 && b.fields.mantelH === undefined && b.notes.some(n => /ambiguous/i.test(n));
+  })());
+  T("spoken", "out-of-range is a note, not silence", (() => {
+    const r = parseUtterance("wall ten wide");
+    return r.fields.wallW === undefined && r.notes.some(n => /outside/i.test(n)) && r.ignored > 0;
+  })());
+  T("spoken", "gibberish tolerated, nothing matched", (() => {
+    const r = parseUtterance("the quick brown fox, speakers in the ceiling");
+    return r.matched.length === 0 && r.ignored > 0;
+  })());
+  T("spoken", "emits the extractImportedDesign shape", (() => {
+    const r = parseUtterance("wall 120 by 108");
+    return Array.isArray(r.matched) && Array.isArray(r.notes) && r.native === false &&
+           typeof r.ignored === "number" && typeof r.fields === "object";
+  })());
+
   const passed = results.filter(r => r.pass).length;
   return { results, passed, total: results.length };
 };
@@ -3442,6 +3691,8 @@ export default function App() {
   // { risk, run } — a raster/vector export held back because some markup would
   // land invisible on the export sheet. Never rewrites the drawing on its own.
   const [exportAsk, setExportAsk] = useState(null);
+  const [sayAsk, setSayAsk] = useState(null);   // the input box
+  const [heard, setHeard] = useState(null);     // the review card
   const [askValue, setAskValue] = useState("");
   const dragRef = useRef(null);
   const underlayFileRef = useRef(null);
@@ -4893,6 +5144,9 @@ ${sheetsHtml}
               <button className="menu-item" onClick={() => { setShowImport(false); fileRef.current && fileRef.current.click(); }}>
                 DESIGN / SURVEY DATA<span className="menu-sub">JSON from TellaVision or another Field Kit app</span>
               </button>
+              <button className="menu-item" onClick={() => { setShowImport(false); setSayAsk(""); }}>
+                DESCRIBE IT<span className="menu-sub">type or dictate the measurements — nothing applies until you confirm</span>
+              </button>
               <div className="menu-sep"/>
               <div className="menu-note">…or drag a file straight onto the drawing</div>
             </div>
@@ -4950,6 +5204,10 @@ ${sheetsHtml}
         <button className="startc" onClick={() => fileRef.current && fileRef.current.click()}>
           <strong>Design or survey data</strong>
           <span>Pull wall, brand and size straight from a SiteWalk / survey JSON, or reopen a saved design.</span>
+        </button>
+        <button className="startc" onClick={() => setSayAsk("")}>
+          <strong>Describe it</strong>
+          <span>Type or dictate what you measured — “wall ten foot wide, 75 inch Sony” — and check it before it lands.</span>
         </button>
         <button className="startc" onClick={() => setStartHidden(true)}>
           <strong>Start blank</strong>
@@ -5110,6 +5368,90 @@ ${sheetsHtml}
   );
 
   // ----- inline prompts (window.prompt is unreliable in installed PWAs) -----
+  // Type it or dictate it. On iOS the keyboard's own mic fills this box, which
+  // is why there is no speech code anywhere in the app: dictation is an input
+  // method, not a feature.
+  const sayDialog = sayAsk !== null && (
+    <div className="ask-wrap" onClick={() => setSayAsk(null)}>
+      <div className="ask" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="rec-tag">DESCRIBE THE JOB</div>
+        <textarea className="inp" autoFocus rows={3} style={{ resize: "vertical", lineHeight: 1.5 }}
+                  placeholder={`wall is ten foot wide, eight foot ceiling, 75 inch Sony, mantel at fifty-four`}
+                  value={sayAsk}
+                  onChange={e => setSayAsk(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { const r = parseUtterance(sayAsk); setSayAsk(null); setHeard({ parsed: r, keep: Object.fromEntries(Object.keys(r.fields).map(k => [k, true])) }); }
+                    else if (e.key === "Escape") setSayAsk(null);
+                  }}/>
+        <div className="hint" style={{ marginTop: 6 }}>
+          Wall, fireplace, mantel, TV size and brand, heights and offsets. Mount and back box stay on the recommendation engine.
+          Nothing is applied until you check it on the next screen.
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+          <button className="btn ghost" onClick={() => setSayAsk(null)}>CANCEL</button>
+          <button className="btn" onClick={() => { const r = parseUtterance(sayAsk); setSayAsk(null); setHeard({ parsed: r, keep: Object.fromEntries(Object.keys(r.fields).map(k => [k, true])) }); }}>READ IT</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Proposed, never applied. A misheard number here is a hole in the wrong place
+  // in a finished wall, so every value is shown against the phrase that produced
+  // it and can be dropped before anything touches the design.
+  const heardDialog = heard && (() => {
+    const { parsed, keep } = heard;
+    const LEN_FIELDS = ["wallW", "wallH", "mantelH", "fbOpeningW", "fbOpeningH", "mountHeightOverride", "tvOffsetX"];
+    const show = (k, v) => {
+      if (typeof v === "boolean") return v ? "yes" : "no";
+      if (k === "selectedSize") return `${v}"`;
+      if (k === "heightRef") return v === "bottom" ? "bottom of TV" : "centre of TV";
+      if (LEN_FIELDS.includes(k)) { const n = parseFloat(v); return isFinite(n) ? fmt(n) : String(v); }
+      return String(v);
+    };
+    const rows = Object.keys(parsed.fields);
+    const chosen = rows.filter(k => keep[k]);
+    // A spoken dimension is a claim, not a verification — the same rule the
+    // camera plan sets for a scale you did not tape.
+    const clash = underlay && chosen.some(k => k === "wallW" || k === "wallH");
+    return (
+      <div className="ask-wrap" onClick={() => setHeard(null)}>
+        <div className="ask" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+          <div className="rec-tag">HEARD {rows.length ? `— ${chosen.length} OF ${rows.length} SELECTED` : ""}</div>
+          {parsed.transcript && <div className="hint" style={{ marginBottom: 10, fontStyle: "italic" }}>“{parsed.transcript}”</div>}
+          {rows.map(k => (
+            <label key={k} className="chk-row" style={{ justifyContent: "space-between" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span className={`chk ${keep[k] ? "on" : ""}`}>{keep[k] ? <Icon name="check" size={11}/> : null}</span>
+                <span>{SPOKEN_LABELS[k] || k}</span>
+              </span>
+              <strong style={{ fontFamily: "var(--fm)" }}>{show(k, parsed.fields[k])}</strong>
+              <input type="checkbox" checked={!!keep[k]} style={{ display: "none" }}
+                     onChange={() => setHeard(h => ({ ...h, keep: { ...h.keep, [k]: !h.keep[k] } }))}/>
+            </label>
+          ))}
+          {parsed.notes.map((n, i) => <div key={i} className="note-box">{n}</div>)}
+          {clash && (
+            <div className="warn-box">
+              <div className="warn-title">REFERENCE DRAWING IS SCALED TO THE CURRENT WALL</div>
+              A spoken dimension is a claim, not a measurement. Changing the wall will not rescale the
+              drawing — re-run SNAP TO TV or 2-POINT afterwards, or drop the wall rows here.
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+            <button className="btn ghost" onClick={() => { setSayAsk(parsed.transcript); setHeard(null); }}>EDIT</button>
+            <button className="btn ghost" onClick={() => setHeard(null)}>CANCEL</button>
+            <button className="btn" disabled={!chosen.length}
+                    onClick={() => {
+                      const fields = Object.fromEntries(chosen.map(k => [k, parsed.fields[k]]));
+                      applyImport({ fields, matched: parsed.matched, ignored: parsed.ignored, notes: parsed.notes, native: false });
+                      setHeard(null); setStartHidden(true);
+                    }}>APPLY{chosen.length ? ` ${chosen.length}` : ""}</button>
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
   const askDialog = (calibAsk || textAsk) && (
     <div className="ask-wrap" onClick={() => { setCalibAsk(null); setTextAsk(null); setCalib(null); calibPtsRef.current = []; }}>
       <div className="ask" onClick={e => e.stopPropagation()}>
@@ -5665,6 +6007,8 @@ ${sheetsHtml}
           {canvas}
           {askDialog}
           {inkDialog}
+          {sayDialog}
+          {heardDialog}
           {statusBar}
           {isMobile && <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>{startBtns}{exportBtns}</div>}
         </main>
