@@ -88,3 +88,78 @@ in. **Add sweep configs for each view preset** before trusting the output.
 - Whether tape-out tick-offs persist with the job or reset each time
 - Whether Layout and Client are distinct enough to both exist, or whether Client
   is simply Layout over a photo with the annotations off
+
+---
+
+## Built — v2.5.0
+
+Shipped as five views (`VIEW_PRESETS` / `VIEW_ORDER`) plus a multi-page PDF.
+Three things in the plan above turned out to be wrong or incomplete, and the
+corrections are the useful part of this record.
+
+### 1. "A view is just a named set of the existing toggles" — no
+
+`showOutlet` does not only draw the outlet. It also feeds `buildPartsList` and
+the DXF notes. A preset that switched it off to declutter a page would have
+silently dropped the outlet from that page's parts list, and the crew would have
+worked a sheet that understated the job.
+
+So a view is a **display-only filter**: gated booleans (`vPwr`, `vBox`, …)
+derived inside `buildSchematic` from the view and the toggle together. The
+design is never altered. The parts list, the spec table and the DXF always
+describe the whole job, whatever page you are looking at.
+
+### 2. Filtering alone makes the Tape-out page blank
+
+`showTapeOut` defaults to off, so the one page whose entire purpose is tape-out
+rendered nothing. Fixed with a `force` map on each preset — but only for
+**derived aids** (tape lines, VESA pattern), which are computed from geometry
+already on the page and add no scope. Scope facts (outlet, low voltage, back
+box) are never forced: if the job has no outlet, a page that drew one would be
+lying. Rule of thumb: a page dedicated to a derived aid should never be blank; a
+page whose subject genuinely isn't in this job should be.
+
+### 3. The sweep gap was real, and it caught a live bug
+
+Adding per-view sweep configs (5 stress cases × 4 views, plus two "toggle off,
+view forces it on" cases) took the suite from 103 to 125 configs and immediately
+failed one: `view:tapeout mobile 375`, "VERTICALS FROM LEFT WALL" over
+"108" H".
+
+Not a layout tweak — a real defect. `hasRail`, which reserves **horizontal**
+space for the callout rail, tested only vesa/box/pwr/lv. The packing simulation,
+which reserves **vertical** space, tested those *and* tape *and* mount. The two
+had drifted. Every view before Tape-out happened to have one of the four on, so
+the rail was always reserved by accident. Tape-out is the first page whose rail
+holds only a tape pill — nothing was reserved, and the pill landed on the
+wall-height dimension.
+
+Fixed by deriving one set of predicates (`railHasVesa`, `railHasBox`,
+`railHasSanus`, `railHasTravel`) and using them in all three places that need to
+agree: horizontal reservation, vertical simulation, and the rail pushes
+themselves. They can no longer drift.
+
+### 4. Multi-page PDF
+
+Sheet 1 is the whole job — full drawing plus specs, parts and notes. Sheets 2–5
+are Layout, Rough-in, Mount, Tape-out: one drawing each, a caption naming the
+task, and the legend. The spec and parts tables are deliberately **not**
+repeated; they describe the job, not the sheet, and a per-page copy invites
+someone to work from a partial page they didn't notice was partial. Each sheet
+says so in its caption.
+
+Off-screen rendering (`renderViewSvg`) reuses the sweep's technique. One
+prerequisite bug: `K()` keyed element ids on the palette alone, so all five
+sheets emitted the same underlay `clipPath` id and every page would have clipped
+to page one's crop. Ids are now scoped by view as well. Verified with a cropped
+underlay: five sheets, five distinct clip ids, each image referencing its own.
+
+Toggle: Settings → Multi-page PDF (default on). Off exports exactly the view on
+screen.
+
+## Still open
+
+- Tape-out checklist treatment (tick-offs on the tape-out sheet)
+- Whether tape-out tick-offs persist with the job or reset each time
+- Client/presentation view — still blocked on the camera work in
+  PLAN-camera-and-presentation.md

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TellaVision — Build index.html</title>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body { font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; background: #0D1B2A; color: #E8EEF5; margin: 0; padding: 24px; }
+  h1 { font-size: 15px; letter-spacing: 2px; margin: 0 0 4px; }
+  p { color: #8DA3B8; max-width: 70ch; }
+  button { font: inherit; padding: 9px 14px; background: #3ECFE0; color: #06121F; border: none; border-radius: 5px; cursor: pointer; font-weight: 700; letter-spacing: 1px; }
+  button[disabled] { opacity: .4; cursor: default; }
+  #log { margin-top: 18px; white-space: pre-wrap; border: 1px solid #27425F; border-radius: 5px; padding: 12px; max-height: 60vh; overflow: auto; }
+  .ok { color: #4ADE80; } .bad { color: #FF5C4D; }
+</style>
+</head>
+<body>
+<h1>BUILD index.html</h1>
+<p>Compiles <code>tellavision.tsx</code> with Babel standalone and wraps it in the
+production shell — the same transform <code>dev.html</code> applies, plus the
+bootstrap tail. Serve this page over http (not file://) so the fetches work,
+then save the downloaded file over <code>index.html</code>.</p>
+<button id="go">COMPILE AND DOWNLOAD</button>
+<div id="log">idle</div>
+<script>
+const log = (m, cls) => { const d = document.createElement("div"); if (cls) d.className = cls; d.textContent = m; document.getElementById("log").appendChild(d); };
+
+// The production shell. Kept here, beside the transform, because the two have
+// to agree: the shell provides React and the hooks the compiled code closes
+// over, and the tail mounts the app and registers the service worker.
+const HEAD = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TellaVision">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="theme-color" content="#0B1622">
+<title>TellaVision — Synergy AV</title>
+<style>html, body, #root { height: 100%; margin: 0; background:#0B1622; }</style>
+<script src="./vendor/react.production.min.js"><\/script>
+<script src="./vendor/react-dom.production.min.js"><\/script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const { useState, useMemo, useRef, useEffect } = React;
+`;
+const TAIL = `
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(window.App));
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("./sw.js").catch(function(){});
+}
+<\/script>
+</body>
+</html>
+`;
+
+async function compile() {
+  const src = await (await fetch("tellavision.tsx?ts=" + Date.now())).text();
+  // The react import is dropped, not compiled: the shell above already
+  // destructures the hooks off the global React it loads. Drop it WITHOUT
+  // providing that line and the compiled body closes over hooks that are not
+  // in scope, and the page dies on first render.
+  const patched = src
+    .replace(/^\s*import\s+\{[^}]*\}\s+from\s+["']react["'];?\s*$/m, "")
+    .replace(/export\s+default\s+function\s+App/, "function App")
+    + "\nwindow.App = App;\n";
+  const out = Babel.transform(patched, {
+    presets: ["typescript", ["react", { runtime: "classic" }]],
+    filename: "tellavision.tsx",
+  }).code;
+  // The compiled body must never contain a literal "<\/script" — it would
+  // close the inline block early and the page renders blank with no error.
+  // Note this comment cannot spell it either, for exactly that reason.
+  const body = out.replace(/<\/script/gi, "<\\/script");
+  return { body, html: HEAD + body + TAIL };
+}
+
+const sha256 = async (s) => {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+};
+
+// Exposed for an automated caller: compile, then hand back a line diff against
+// the index.html already on disk plus a hash of the intended result, so the
+// new file can be reconstructed and then PROVEN byte-identical.
+window.buildDiff = async () => {
+  const { body, html } = await compile();
+  const cur = await (await fetch("index.html?ts=" + Date.now())).text();
+  const A = cur.split("\n"), B = html.split("\n");
+
+  // Greedy walk with resynchronisation on a run of identical lines. Fine here
+  // because edits are localised; RUN=8 is long enough that a stretch of common
+  // boilerplate (closing braces, JSX props) cannot resync in the wrong place.
+  const RUN = 8, LOOK = 6000;
+  const idx = new Map();
+  B.forEach((l, n) => { if (!idx.has(l)) idx.set(l, []); idx.get(l).push(n); });
+  const runMatches = (a, b) => {
+    for (let k = 0; k < RUN; k++) if (A[a + k] !== B[b + k]) return false;
+    return true;
+  };
+  const hunks = [];
+  let a = 0, b = 0;
+  while (a < A.length && b < B.length) {
+    if (A[a] === B[b]) { a++; b++; continue; }
+    let best = null;
+    for (let p = a; p < Math.min(A.length - RUN, a + LOOK); p++) {
+      for (const q of (idx.get(A[p]) || [])) {
+        if (q < b) continue;
+        if (q - b > LOOK) break;
+        if (!runMatches(p, q)) continue;
+        const cost = (p - a) + (q - b);
+        if (!best || cost < best.cost) best = { p, q, cost };
+        break;
+      }
+      if (best && (p - a) > best.cost) break;
+    }
+    if (!best) break;
+    hunks.push({ at: a, del: best.p - a, ins: B.slice(b, best.q) });
+    a = best.p; b = best.q;
+  }
+  if (a < A.length || b < B.length) hunks.push({ at: a, del: A.length - a, ins: B.slice(b) });
+
+  return { oldLines: A.length, newLines: B.length, hunks,
+           htmlSha: await sha256(html), htmlBytes: html.length };
+};
+
+document.getElementById("go").onclick = async (e) => {
+  e.target.disabled = true;
+  document.getElementById("log").textContent = "";
+  try {
+    const t0 = performance.now();
+    const { body, html } = await compile();
+    log(`compiled in ${Math.round(performance.now() - t0)} ms`, "ok");
+    log(`body ${body.length.toLocaleString()} chars · file ${html.length.toLocaleString()} chars`);
+    log(`sha256(index.html) ${await sha256(html)}`);
+    if (/<\/script>/i.test(body)) log("REFUSED: compiled body still contains a raw script closer", "bad");
+    else {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      a.download = "index.html";
+      a.click();
+      log("downloaded — save it over index.html in the repo", "ok");
+    }
+  } catch (err) { log(String(err && err.stack || err), "bad"); }
+  e.target.disabled = false;
+};
+</script>
+</body>
+</html>

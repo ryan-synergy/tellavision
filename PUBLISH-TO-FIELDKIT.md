@@ -20,6 +20,15 @@ from `tv-wall-planner-v1` to `tellavision-v1`, and JSON imports accept
 - `sw.js`, `favicon.png`, `apple-touch-icon.png` — ship alongside it.
 - `dev.html` + `tellavision.tsx` — the dev harness (Babel-in-browser).
   **Edits happen in the tsx**: test via dev.html, then recompile index.html.
+- `build.html` — the recompiler, and the answer to "recompile index.html" every
+  step below assumes. Serve the repo over http, open `build.html`, press
+  **COMPILE AND DOWNLOAD**, save the file over `index.html`. It is the ONLY
+  supported way to regenerate the build: it pairs the transform with the shell
+  that provides `React` and the destructured hooks the compiled body closes
+  over, and it escapes `</script` in the output rather than leaving you to
+  remember. It needs the network (Babel comes from unpkg) and is not in the SW
+  cache, so it is a workstation tool, not a field one — the repo root is the
+  Pages source, so it does ship, but nothing links to it and nothing loads it.
 - `tellavision-legacy.tsx` — pre-rebuild reference only. Never deploy.
 
 ## Recommended deploy: Pages on THIS repo
@@ -52,12 +61,18 @@ URL won't match the name. Prefer Pages-on-this-repo.)
 
 ## Acceptance checks — do not publish if any fail
 
-- Status-bar badge reads **✓ 100/100**
+- Status-bar badge reads **✓ 118/118**
 - No CDN: `grep -c unpkg index.html` must be **0**. React and pdf.js are
   vendored in `vendor/`; the app must run with the network off. (embedded self-tests; if red the math is
   broken — click the badge → COPY REPORT and stop).
-- In the diagnostics panel, run **SWEEP** → **0 failing / ~95 configs**
+- In the diagnostics panel, run **SWEEP** → **0 failing / 125 configs**
   (label-collision audit — includes L and XL type runs).
+- Render audit reads **0 overlaps · 0 clipped · 0 unbacked** in all three
+  themes (it audits the ACTIVE theme, so switch and re-read).
+- Settings → Appearance: switch **Density** to Compact and back. Type and
+  spacing tighten; tap targets do NOT shrink — 44pt holds in both.
+- Sidebar shows one stage at a time, collapsed stages carry a live summary
+  (`120.0" × 108.0"`, `Sony 75"`), and `ALL SECTIONS` expands everything.
 - EXPORT → FULL PACK produces a JSON download, a DXF download, and opens the
   PDF print window.
 - Mobile width shows the SETUP / DRAWING / SPECS tabs.
@@ -68,6 +83,12 @@ URL won't match the name. Prefer Pages-on-this-repo.)
   (IndexedDB) with its calibration and markup intact.
 - EXPORT → PDF contains the underlay `<image>` and the markup strokes; the DXF
   contains a `MARKUP` layer.
+- Draw one stroke with the **white** swatch: the swatch shows a caution dot, a
+  `▲ 1 INVISIBLE ON PAPER` chip appears beside EXPORT, and EXPORT → PDF/PNG/SVG
+  stops and names the stroke. JSON and DXF are NOT gated and must not be.
+- Draw one stroke with the **AUTO** swatch, then switch theme: it is near-white
+  on Dark and Blueprint and near-black on Paper, and the exported SVG contains
+  it as `#102A43`. It must never appear in the warning on any theme.
 
 ## Chrome budget — options hide, tools stay
 
@@ -351,3 +372,25 @@ is too narrow to hold both side by side.
   manufacturer spec sheets supplied by Ryan — never invent SKU specs. Sony 115
   has NO VESA entry on purpose (unpublished); add it only from a real sheet.
 - After ANY schematic change, rerun SWEEP and keep it at 0 failures.
+- **Markup colour resolves at RENDER time, never on the stored stroke.**
+  `color: "auto"` is what goes to localStorage and to exported JSON;
+  `resolveMarkupColor` turns it into the palette's `line` inside
+  `renderMarkupEls`. Resolving on the way IN would bake one theme's colour into
+  the saved design, and resolving on the way OUT would rewrite the user's
+  choice — a stroke stored as a literal `#FFFFFF` must still export as
+  `#FFFFFF`, because white over a dark photo underlay is a real intent. The
+  export guard reports and offers; it recolours only when the user presses the
+  button.
+- `renderMarkupEls` needs BOTH `paper` and `ink` from the palette it is drawing
+  into. The live in-progress stroke gets them from `screenSchem.P` — miss that
+  and an `auto` stroke flips colour the instant the drag ends and it moves from
+  the draft overlay into the schematic.
+- `MARKUP_MIN_CONTRAST` is **1.5, not the WCAG 3:1**. Amber (1.83), green
+  (1.91) and blue (2.75) are all below 3:1 on white and all read fine as 2px
+  linework; holding markup to the text threshold flags four of six swatches and
+  the warning stops meaning anything. Self-tests pin the measured ratio of every
+  swatch, so retuning a palette across the line fails the harness.
+- The diagnostics panel derives its group list from the results. It used to be
+  a hard-coded `["golden","format","interop","invariant"]`, so five groups ran
+  and counted toward the badge while never appearing in the panel. Do not put
+  the literal back.

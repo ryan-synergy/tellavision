@@ -40,9 +40,51 @@ real inches. Snap to the wall, floor, TV edges and centreline so measurements
 land exactly. Select, drag, reshape and recolour anything after you have drawn
 it.
 
+**Ink that survives the export.** The first swatch is **AUTO**: it is not a
+colour but a rule — draw with it and the stroke comes out near-white on the
+blueprint and near-black on the printed sheet, because it resolves to whatever
+the drawing it lands on uses for linework. The six fixed colours still behave
+exactly as before; nothing is ever recoloured behind your back, because white
+over a dark photo underlay is a legitimate thing to have meant.
+
+Because a fixed colour can outlive the surface it was chosen against, two things
+watch for it. A swatch that would be invisible — in the current theme, or on the
+white export sheet, which is what PDF, PNG and SVG always print on — carries a
+caution dot, and its tooltip says which of the two is failing. And a PDF, PNG,
+SVG or Full Pack export that would lose a stroke stops first and names the
+strokes, offering to switch just those to AUTO. You can always export anyway.
+
+**One task at a time.** The view switcher in the header filters the drawing to
+the job in front of you — **Layout**, **Rough-in**, **Mount**, **Tape-out**, or
+**Full**. It filters the drawing only: the parts list, the specification table
+and the DXF always describe the whole job, so no sheet can understate the scope.
+Tape-out and Mount draw their own guides even when those are switched off in
+Settings.
+
+**One stage at a time.** The sidebar is a stepper — START, THE WALL, THE TV,
+THE HARDWARE. Only the stage you are working in shows its controls; the others
+collapse to a row carrying their summary (`120" × 108" · fireplace`, `Sony 75"`)
+that you tap to jump to. Within a stage, sections are single-open. That takes
+the sidebar from about 34 rows to 8. `ALL SECTIONS` at the bottom expands
+everything if you want the old behaviour.
+
+**Two densities.** Comfortable (default) and Compact, in Settings → Appearance.
+Compact restores the older, tighter type and spacing — but **not** the older tap
+targets. 44pt is a floor, not a preference: a control too small to hit reliably
+is a defect at either density.
+
+**Three themes.** **Dark** (the original), **Blueprint** (cyanotype — white
+linework on deep blue), and **Paper** (ink on white, exactly what the PDF
+prints). Settings → Appearance. Themes change the screen only: every export —
+PDF, PNG, SVG, DXF — always uses the print palette, so the client gets the same
+document whichever theme you happen to be working in. A self-test pins the
+stronger claim, that a theme cannot move anything on the drawing, only recolour
+it.
+
 **Hand it off.** Export a PDF submittal sheet with specs and a rough-in parts
 list, a layered true-scale DXF for AutoCAD / Visio / Bluebeam, JSON for other
-Field Kit apps, or PNG / SVG.
+Field Kit apps, or PNG / SVG. The PDF defaults to one sheet per task, so the
+electrician can be handed the rough-in sheet and nothing else.
 
 ---
 
@@ -136,7 +178,7 @@ published screen range in the catalog is the WB80's 60"–90".
 
 | Format | What it is |
 |---|---|
-| **PDF** | Submittal sheet — elevation, specification table, rough-in parts list, field-verification notes |
+| **PDF** | Submittal sheet — elevation, specification table, rough-in parts list, field-verification notes. With **Multi-page PDF** on (default), sheet 1 is the whole job and sheets 2–5 are Layout, Rough-in, Mount and Tape-out, one drawing each. Specs and parts appear on sheet 1 only — they describe the job, not the sheet, and each task sheet says so. Turn it off to export exactly the view on screen. |
 | **DXF** | True-scale, layered (`WALL`, `TV`, `VESA`, `BACKBOX`, `ELECTRICAL`, `LOWVOLT`, `DIMENSIONS`, `MARKUP`…) for AutoCAD, Visio, Bluebeam |
 | **JSON** | Design + computed values, so other apps can consume the results without reimplementing the engine |
 | **PNG / SVG** | Blueline raster / vector image |
@@ -144,6 +186,11 @@ published screen range in the catalog is the WB80's 60"–90".
 
 The reference drawing and markup appear in PDF, PNG and SVG. DXF carries markup
 on its own layer; a raster underlay has no DXF equivalent.
+
+Those three raster/vector exports serialise the print palette on white, so they
+are the ones gated by the contrast warning above. JSON stores every markup
+colour verbatim (`"auto"` included, as the sentinel) and DXF hands markup to the
+CAD app on its own layer, so neither can lose a stroke and neither is gated.
 
 ---
 
@@ -159,23 +206,63 @@ python3 -m http.server 5173
 
 - `dev.html` — live harness, transpiles `tellavision.tsx` in the browser with
   Babel standalone. Edit and reload; no build step.
-- `index.html` — production build. Regenerate it from `tellavision.tsx` when
-  shipping; see `PUBLISH-TO-FIELDKIT.md` for the exact procedure and the
-  `</script>` escaping trap that silently blanks the page if you miss it.
+- `build.html` — the recompiler. Open it over http, press **COMPILE AND
+  DOWNLOAD**, and save the result over `index.html`. It applies the same
+  transform `dev.html` does, adds the production shell and the mount/service-
+  worker tail, and escapes any `</script` in the compiled output — the trap
+  that silently blanks the page if you inline the JS by hand. It refuses to
+  emit a file that still contains a raw closer.
+- `index.html` — production build, generated by `build.html`. Never edit it
+  directly: the next recompile overwrites it. See `PUBLISH-TO-FIELDKIT.md`.
 
 ### Health checks
 
 The app self-tests on every load. The badge in the status bar is the contract:
 
-- **✓ 100/100** embedded self-tests — golden hand-computed cases, catalog
-  invariants, snapping, markup geometry, JSON interop. If this is red, do not
-  trust the drawing.
-- **SWEEP** in the diagnostics panel — 103 hostile configurations checked for
-  label collisions, including runs at the largest text size. Must read
-  `0 failing`.
+- **✓ 118/118** embedded self-tests — golden hand-computed cases, catalog
+  invariants, snapping, markup geometry, markup ink and contrast, JSON interop.
+  If this is red, do not trust the drawing. The panel lists every group it
+  actually ran; the list used to be hard-coded to four, which quietly hid the
+  snapping, markup, stud-bay, mount and underlay groups from view.
+- **SWEEP** in the diagnostics panel — 125 hostile configurations checked for
+  label collisions, including runs at the largest text size and every task view
+  under its worst label loads. Must read `0 failing`.
+
+  Adding a view means adding its sweep configs in the same commit. A view
+  repacks the leader rail from a different subset, so a page that is fine at
+  Full can still collide — this is not theoretical, it is how the Tape-out rail
+  bug was caught (see `docs/PLAN-views.md`).
 - **Render audit** — every text bounding box checked for overlaps, clipping,
   and for sitting on linework without a backing plate. Must read
-  `0 overlaps · 0 clipped · 0 unbacked`.
+  `0 overlaps · 0 clipped · 0 unbacked`. It runs against the *active* theme, so
+  switching theme re-audits the drawing.
+
+Three DOM audits back the chrome, run in the browser against the live page over
+3 themes × 2 densities × 4 stages, all currently at zero:
+
+- **Contrast** — WCAG AA, 4.5:1 body / 3:1 large, main UI and settings panel.
+- **Tap targets** — nothing interactive below 44×44, in either density. The one
+  deliberate exception is the diagnostics badge, at 40px tall: the status bar is
+  a fixed thin strip and a 44px badge would dominate it.
+- **Type floor** — nothing below 9.5px, in either density.
+
+Two things to know before running these yourself. **Disable CSS transitions
+first** (`transition: none !important`) — a hidden browser pane freezes them
+mid-flight, so you sample interpolated colours and chase bugs that are not
+there. And **measure interactive elements only**: a decorative `<span>` carrying
+a control's class is not a target, and counting it sends you enlarging things
+that were already fine.
+Markup ink is the deliberate exception and is held to `MARKUP_MIN_CONTRAST`
+(1.5), not to 3:1 — a saturated 2px amber redline reads perfectly well on white
+at 1.83:1 because hue carries it, and the WCAG figure would flag four of the six
+swatches until the warning became noise nobody reads. The self-tests pin the
+measured ratio of every swatch on every palette, so retuning a palette that
+pushes one across the line fails the harness rather than shipping. If
+you add or retune a theme, measure it — the print palette's greys look fine on
+paper and are too light on a backlit screen, which is exactly the trap the Paper
+theme fell into first time. Note that measuring contrast in an automated browser
+needs transitions disabled (`transition: none !important`), or you will sample
+frozen mid-transition colours and chase bugs that are not there.
 
 Golden test constants are hand-derived, not pasted from output. If a catalog
 change makes one fail, re-derive it — the arithmetic is in the inline comments.

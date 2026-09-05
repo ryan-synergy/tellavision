@@ -19,7 +19,7 @@
 const { useState, useMemo, useRef, useEffect } = React;
 // App version. Distinct from the drawing's REV, which is per-project and set
 // by the user in the Project panel. Bump on release and tag the repo to match.
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.7.0";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — DATA
@@ -1265,6 +1265,95 @@ const calibrateToBox = (u, box, realW, target) => {
 const MARKUP_TOOLS = ["select", "mask", "pen", "line", "arrow", "rect", "text", "measure"];
 const MARKUP_COLORS = ["#FF3B30", "#FFB000", "#00D68F", "#4A9EFF", "#FFFFFF", "#111111"];
 const MARKUP_WIDTHS = [1, 2, 3.5];
+const TOOL_LABEL = {
+  move: "MOVE",
+  select: "SELECT",
+  mask: "BLANK",
+  pen: "PEN",
+  line: "LINE",
+  arrow: "ARROW",
+  rect: "BOX",
+  text: "TEXT",
+  measure: "MEASURE"
+};
+
+// --- markup colour: fixed swatches, plus one that follows the paper --------
+// "auto" is a SENTINEL, not a colour. It resolves at RENDER time to whatever
+// the palette being drawn uses for linework, so a single stroke comes out
+// near-white on the blueprint and near-black on the printed sheet.
+//
+// Resolution never touches the stored item: `color: "auto"` is what goes into
+// localStorage and into exported JSON, so a design saved on one theme opens
+// correctly on another — and an old design carrying a literal "#FFFFFF" is
+// still drawn in that exact white, because the user may have meant it.
+const MARKUP_AUTO = "auto";
+// The swatch row. MARKUP_COLORS stays the list of FIXED colours, so a saved
+// mkColor from before this existed still validates against it.
+const MARKUP_SWATCHES = [MARKUP_AUTO, ...MARKUP_COLORS];
+// Strokes drawn before the colour picker existed carry no `color` at all.
+const MARKUP_DEFAULT_COLOR = MARKUP_COLORS[0];
+const resolveMarkupColor = (color, P) => color === MARKUP_AUTO ? P && P.line || MARKUP_DEFAULT_COLOR : color || MARKUP_DEFAULT_COLOR;
+
+// --- contrast ------------------------------------------------------------
+// WCAG relative luminance. Used only to answer one question — will this stroke
+// be visible on this ground — never to grade the UI, which is measured in a
+// browser against real computed styles.
+const hexToRgb = hex => {
+  const h = String(hex || "").trim().replace(/^#/, "");
+  const s = h.length === 3 ? h.split("").map(c => c + c).join("") : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(s)) return null;
+  return [0, 2, 4].map(i => parseInt(s.slice(i, i + 2), 16) / 255);
+};
+const relLuminance = hex => {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  const [r, g, b] = rgb.map(c => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrastRatio = (a, b) => {
+  const la = relLuminance(a),
+    lb = relLuminance(b);
+  if (la === null || lb === null) return null;
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+
+// Deliberately NOT the WCAG 3:1 figure. A 2px saturated amber redline reads
+// perfectly well on white at 1.83:1 because hue carries it, and green (1.91)
+// and blue (2.75) are no different — holding markup to the text threshold
+// would flag four of the six swatches and the warning would become noise
+// nobody reads. 1.5 catches the one thing that actually goes wrong: a stroke
+// drawn in essentially the same colour as its own paper. Red sits at 3.55 and
+// near-black at 18.9, so the gap either side of the line is wide.
+const MARKUP_MIN_CONTRAST = 1.5;
+
+// Will this stroke colour still be visible on that palette's ground?
+// `auto` is safe by construction — it IS the palette's linework colour.
+const markupColorSafeOn = (color, P) => {
+  if (color === MARKUP_AUTO) return true;
+  const r = contrastRatio(resolveMarkupColor(color, P), P && P.canvas || "#FFFFFF");
+  return r === null ? true : r >= MARKUP_MIN_CONTRAST;
+};
+
+// Strokes that would come out invisible if the drawing were rendered on `P`.
+// Blanking patches are excluded — they are painted in the paper colour on
+// purpose. Nothing here rewrites anything; it only reports.
+const markupContrastRisk = (items, P) => (items || []).map((m, i) => ({
+  m,
+  i
+})).filter(({
+  m
+}) => m && m.type !== "mask" && (m.pts || []).length).filter(({
+  m
+}) => !markupColorSafeOn(m.color || MARKUP_DEFAULT_COLOR, P)).map(({
+  m,
+  i
+}) => ({
+  id: m.id ?? i,
+  index: i,
+  type: m.type,
+  color: resolveMarkupColor(m.color, P),
+  label: m.type === "text" && m.text ? `TEXT "${m.text}"` : TOOL_LABEL[m.type] || String(m.type || "").toUpperCase()
+}));
 
 // Drawing type size. Scales every glyph AND the padding, plate and rail-packing
 // maths derived from it, so a bigger label never collides or clips.
@@ -2348,6 +2437,10 @@ const extractImportedDesign = data => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const approx = (a, b, eps = 0.02) => Math.abs(a - b) <= eps;
+
+// Preferred order for the diagnostics panel. Anything not listed still shows,
+// after these — a new group can never go missing from the panel again.
+const DIAG_GROUP_ORDER = ["golden", "format", "snap", "markup", "ink", "interop", "invariant"];
 const runSelfTests = () => {
   const results = [];
   const T = (group, name, pass, detail = "") => results.push({
@@ -3021,6 +3114,133 @@ const runSelfTests = () => {
     }, dxfLayout2);
     return typeof d === "string" && d.includes("MARKUP");
   })());
+
+  // ---- markup ink: legibility on whatever paper it lands on ----
+  {
+    const near = (a, b) => Math.abs(a - b) < 0.01;
+    T("ink", "contrast ratio: identical colours 1.0, black on white 21.0", (() => {
+      const same = contrastRatio("#FFFFFF", "#FFFFFF");
+      const max = contrastRatio("#000000", "#FFFFFF");
+      return near(same, 1) && near(max, 21) && contrastRatio("#fff", "#000") === contrastRatio("#000000", "#ffffff");
+    })());
+    T("ink", "bad hex is reported as unknown, never as a false pass/fail", contrastRatio("chartreuse", "#FFFFFF") === null && relLuminance("#GGG") === null);
+
+    // The threshold is the whole design: it has to separate "the same colour as
+    // the paper" from "a saturated redline that reads fine". These are the six
+    // fixed swatches against the white export sheet.
+    const onPrint = MARKUP_COLORS.map(c => contrastRatio(c, PRINT_PALETTE.canvas));
+    T("ink", "1.5 threshold splits the swatches where it should — white 1.00, amber 1.83, red 3.55", near(onPrint[4], 1) && near(onPrint[1], 1.83) && near(onPrint[0], 3.55) && near(onPrint[5], 18.88), onPrint.map((r, i) => `${MARKUP_COLORS[i]}=${r.toFixed(2)}`).join(" "));
+    T("ink", "on the export sheet only white is flagged — the saturated colours all survive", MARKUP_COLORS.filter(c => !markupColorSafeOn(c, PRINT_PALETTE)).join() === "#FFFFFF");
+    T("ink", "on the dark theme only near-black is flagged", MARKUP_COLORS.filter(c => !markupColorSafeOn(c, SCREEN_PALETTE)).join() === "#111111");
+
+    // The point of `auto`: there is no palette on which it is the wrong choice.
+    T("ink", "auto is legible on every palette, print included", [SCREEN_PALETTE, CYANOTYPE_PALETTE, PAPER_PALETTE, PRINT_PALETTE, tracePalette(SCREEN_PALETTE)].every(P => markupColorSafeOn(MARKUP_AUTO, P) && contrastRatio(resolveMarkupColor(MARKUP_AUTO, P), P.canvas) >= MARKUP_MIN_CONTRAST));
+    T("ink", "auto resolves per palette — near-white on cyanotype, near-black on print", resolveMarkupColor(MARKUP_AUTO, CYANOTYPE_PALETTE) === "#FFFFFF" && resolveMarkupColor(MARKUP_AUTO, PRINT_PALETTE) === "#102A43");
+
+    // Persistence contract. Old designs must not be reinterpreted.
+    T("ink", "a stored hex is returned untouched, on every palette", [SCREEN_PALETTE, CYANOTYPE_PALETTE, PRINT_PALETTE].every(P => resolveMarkupColor("#FFFFFF", P) === "#FFFFFF"));
+    T("ink", "a stroke saved before the colour picker still draws in the original red", resolveMarkupColor(undefined, PRINT_PALETTE) === MARKUP_DEFAULT_COLOR && resolveMarkupColor(null, CYANOTYPE_PALETTE) === MARKUP_DEFAULT_COLOR);
+    T("ink", "auto survives a JSON round-trip as the sentinel, not as a colour", (() => {
+      const back = JSON.parse(JSON.stringify([{
+        id: "a",
+        type: "pen",
+        color: MARKUP_AUTO,
+        pts: [{
+          x: 0,
+          y: 0
+        }, {
+          x: 5,
+          y: 5
+        }]
+      }]));
+      return back[0].color === MARKUP_AUTO && resolveMarkupColor(back[0].color, PRINT_PALETTE) === PRINT_PALETTE.line;
+    })());
+
+    // The export guard.
+    const mk = [{
+      id: "w1",
+      type: "pen",
+      color: "#FFFFFF",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 9,
+        y: 9
+      }]
+    }, {
+      id: "r1",
+      type: "arrow",
+      color: "#FF3B30",
+      pts: [{
+        x: 1,
+        y: 1
+      }, {
+        x: 8,
+        y: 8
+      }]
+    }, {
+      id: "m1",
+      type: "mask",
+      color: "#FFFFFF",
+      pts: [{
+        x: 0,
+        y: 0
+      }, {
+        x: 4,
+        y: 4
+      }]
+    }, {
+      id: "t1",
+      type: "text",
+      color: "#FFFFFF",
+      text: "VERIFY",
+      pts: [{
+        x: 2,
+        y: 2
+      }]
+    }, {
+      id: "a1",
+      type: "line",
+      color: MARKUP_AUTO,
+      pts: [{
+        x: 3,
+        y: 3
+      }, {
+        x: 7,
+        y: 7
+      }]
+    }, {
+      id: "e1",
+      type: "pen",
+      color: "#FFFFFF",
+      pts: []
+    }];
+    T("ink", "the export guard names the white strokes and nothing else", (() => {
+      const risk = markupContrastRisk(mk, PRINT_PALETTE);
+      return risk.length === 2 && risk[0].id === "w1" && risk[1].id === "t1" && risk[1].label === 'TEXT "VERIFY"';
+    })());
+    T("ink", "blanking patches are never flagged — they are painted in the paper colour on purpose", !markupContrastRisk(mk, PRINT_PALETTE).some(r => r.type === "mask"));
+    T("ink", "a pointless empty stroke is not reported", !markupContrastRisk(mk, PRINT_PALETTE).some(r => r.id === "e1"));
+    T("ink", "risk indices address the original array, so the recolour hits the right strokes", (() => {
+      const risk = markupContrastRisk(mk, PRINT_PALETTE);
+      return risk.every(r => mk[r.index].id === r.id);
+    })());
+    T("ink", "white markup is a risk on paper and safe on the blueprint — the ground is what decides", markupContrastRisk(mk, PRINT_PALETTE).length === 2 && markupContrastRisk(mk, CYANOTYPE_PALETTE).length === 0);
+    T("ink", "an all-auto drawing is clean against every palette", (() => {
+      const auto = mk.filter(m => m.pts.length).map(m => ({
+        ...m,
+        color: MARKUP_AUTO
+      }));
+      return [SCREEN_PALETTE, CYANOTYPE_PALETTE, PAPER_PALETTE, PRINT_PALETTE].every(P => markupContrastRisk(auto, P).length === 0);
+    })());
+    T("ink", "the guard reports without touching the drawing", (() => {
+      const before = JSON.stringify(mk);
+      markupContrastRisk(mk, PRINT_PALETTE);
+      markupContrastRisk(mk, SCREEN_PALETTE);
+      return JSON.stringify(mk) === before;
+    })());
+  }
   T("interop", "Job-walk style JSON → brand/size/wall/project/fireplace", (() => {
     const ex = extractImportedDesign({
       job: {
@@ -3266,6 +3486,80 @@ const runSelfTests = () => {
     const back = JSON.parse(JSON.stringify(state));
     return back.wallW === 120 && back.selectedSize === 65 && back.tvOffsetX === "-3.5" && back.heightRef === "bottom";
   })());
+
+  // A theme must be colour ONLY. The stress sweep renders every configuration
+  // against SCREEN_PALETTE alone, and that is only safe while a palette cannot
+  // move anything — otherwise each new theme would need its own 125 configs.
+  // pillStyle is the one palette key that touches drawing code (filled vs
+  // outline pills), so this pins the invariant rather than assuming it.
+  T("invariant", "Themes change colour only, never geometry", (() => {
+    const st = {
+      wallW: 120,
+      wallH: 108,
+      hasFireplace: true,
+      fbOpeningW: 40,
+      fbOpeningH: 30,
+      fbOffsetIn: 0,
+      hasMantel: true,
+      mantelH: 54,
+      mantelDepth: 8,
+      brand: "Sony",
+      selectedSize: 75,
+      mountSystem: "sanus",
+      dispUnits: "ftin",
+      heightRef: "center",
+      override: "",
+      showVesa: true,
+      showOutlet: true,
+      showLowVolt: true,
+      showBoxDims: true,
+      showTvDims: true,
+      showTapeOut: true,
+      showTravel: true,
+      travelIn: 1.5,
+      fullWords: true,
+      textScale: 1.3,
+      projectName: "Invariant",
+      clientName: "QA",
+      revision: "01",
+      isMobile: false,
+      isTablet: false,
+      viewportW: 1280
+    };
+    const layout = computeLayout({
+      selectedSize: 75,
+      brand: "Sony",
+      centerH: 60,
+      tvCL: 60,
+      showBackBox: true,
+      effectiveBoxModel: recommendBackBox(75, "sanus", "Sony"),
+      mountSystem: "sanus",
+      sanusMount: recommendSanusMount(75, "fixed", "Sony")
+    });
+    // Flatten to every text node's position and size, ignoring colour props.
+    const geom = P => {
+      const schem = buildSchematic({
+        ...st,
+        layout
+      }, P);
+      const out = [];
+      const walk = n => {
+        if (!n || typeof n !== "object") return;
+        if (Array.isArray(n)) return n.forEach(walk);
+        if (n.type === "text") out.push(`${n.props.x},${n.props.y},${n.props.fontSize},${n.props.textAnchor || ""}`);
+        if (n.props && n.props.children) walk(n.props.children);
+      };
+      walk(schem.elements);
+      return {
+        dims: `${schem.svgW}x${schem.svgH}`,
+        texts: out
+      };
+    };
+    const a = geom(SCREEN_PALETTE),
+      b = geom(CYANOTYPE_PALETTE),
+      c = geom(PAPER_PALETTE);
+    return a.texts.length > 20 && a.dims === b.dims && a.dims === c.dims && a.texts.join("|") === b.texts.join("|") && a.texts.join("|") === c.texts.join("|");
+  })());
   const passed = results.filter(r => r.pass).length;
   return {
     results,
@@ -3281,6 +3575,90 @@ const runSelfTests = () => {
 // Schematic colors are literal hex (CSS vars don't survive SVG export).
 // ═══════════════════════════════════════════════════════════════════════════
 
+// A VIEW filters the DRAWING and nothing else.
+//
+// `force` lists groups the view guarantees even when the Settings toggle is off.
+// Only DERIVED AIDS may appear there — tape-out lines and the VESA pattern are
+// computed from geometry already on the page, so drawing them adds no scope.
+// Scope facts (outlet, low voltage, back box) are never forced: showOutlet also
+// drives the parts list, so if the job has no outlet a page that drew one would
+// be lying about the job. A page dedicated to a derived aid should never be
+// blank; a page whose subject genuinely isn't in this job should be.
+//
+// It deliberately does NOT flip the Settings toggles. Those are design facts —
+// showOutlet also drives the parts list and the DXF notes, so a "Mount" preset
+// that switched it off would silently drop the outlet from that page's parts
+// list. The job must describe the same scope on every sheet; only what is drawn
+// changes.
+const VIEW_PRESETS = {
+  full: {
+    label: "Full",
+    hint: "everything",
+    tvDims: 1,
+    vesa: 1,
+    box: 1,
+    pwr: 1,
+    lv: 1,
+    tape: 1,
+    mount: 1,
+    force: {}
+  },
+  layout: {
+    label: "Layout",
+    hint: "TV, wall and heights",
+    tvDims: 1,
+    vesa: 0,
+    box: 0,
+    pwr: 0,
+    lv: 0,
+    tape: 0,
+    mount: 0,
+    force: {
+      tvDims: 1
+    }
+  },
+  roughin: {
+    label: "Rough-in",
+    hint: "box, power, low voltage",
+    tvDims: 0,
+    vesa: 0,
+    box: 1,
+    pwr: 1,
+    lv: 1,
+    tape: 0,
+    mount: 0,
+    force: {}
+  },
+  mount: {
+    label: "Mount",
+    hint: "VESA, plate and hardware",
+    tvDims: 1,
+    vesa: 1,
+    box: 0,
+    pwr: 0,
+    lv: 0,
+    tape: 0,
+    mount: 1,
+    force: {
+      vesa: 1
+    }
+  },
+  tapeout: {
+    label: "Tape-out",
+    hint: "the four lines to snap",
+    tvDims: 0,
+    vesa: 0,
+    box: 0,
+    pwr: 0,
+    lv: 0,
+    tape: 1,
+    mount: 0,
+    force: {
+      tape: 1
+    }
+  }
+};
+const VIEW_ORDER = ["full", "layout", "roughin", "mount", "tapeout"];
 const SCREEN_PALETTE = {
   id: "scr",
   canvas: "#0D1B2A",
@@ -3361,6 +3739,94 @@ const PRINT_PALETTE = {
 // dark ink on white, already tuned for paper — and hollows every solid so the
 // drawing underneath stays readable while you align to it. Side effect worth
 // having: the screen now matches the exported PDF.
+// Cyanotype — the classic blueprint: white linework burned onto a saturated
+// blue ground. Accents are pale tints, because a mid-tone accent that reads
+// well on near-black (the dark theme) disappears against this blue.
+//
+// Worth being honest about: this is a DARK palette. It is the picture everyone
+// has of a blueprint, but it will not help in direct sun — that is what the
+// paper theme is for.
+const CYANOTYPE_PALETTE = {
+  id: "cyn",
+  canvas: "#12395E",
+  grid: "rgba(255,255,255,0.07)",
+  wallFill: "#17456F",
+  wallStroke: "#FFFFFF",
+  line: "#FFFFFF",
+  lineSoft: "#A8C4DD",
+  tvFill: "#0E2E4C",
+  tvStroke: "#FFFFFF",
+  screenFill: "#103552",
+  tvLabel: "#A8C4DD",
+  mantel: "#2A5A85",
+  fbFill: "#1A4A76",
+  fbOpen: "#0C2740",
+  dimText: "#FFFFFF",
+  dimSub: "#A8C4DD",
+  halo: "#12395E",
+  dimW: 1,
+  maskFill: "#12395E",
+  cl: "#FF9C8F",
+  vesa: "#FFD98A",
+  box: "#7FE3F0",
+  boxBad: "#FF8A7A",
+  pwr: "#8BEBA8",
+  lv: "#FFC48A",
+  mount: "#A8C4DD",
+  pillStyle: "filled",
+  pillText: "#0B2B47",
+  tape: "#9BF3E4",
+  title: "#A8C4DD"
+};
+
+// Paper — the print palette on screen, so what you see is what the PDF prints.
+// Only the grid is lifted: the print grid is nearly invisible by design (it
+// should not compete with linework on paper) but on a backlit screen it
+// disappears entirely, and the grid is what makes the drawing read as scaled.
+const PAPER_PALETTE = {
+  ...PRINT_PALETTE,
+  id: "ppr",
+  canvas: "#FBFCFE",
+  grid: "rgba(16,42,67,0.10)"
+};
+
+// The three themes. `palette` drives the DRAWING; `tokens` drive the app
+// chrome. Both have to move together — a blueprint drawing inside dark-navy
+// chrome looks like a bug, not a theme.
+const THEMES = {
+  dark: {
+    label: "Dark",
+    hint: "the original — near-black, blueline",
+    palette: SCREEN_PALETTE
+  },
+  blueprint: {
+    label: "Blueprint",
+    hint: "cyanotype — white lines on blue",
+    palette: CYANOTYPE_PALETTE
+  },
+  paper: {
+    label: "Paper",
+    hint: "what the PDF prints — ink on white",
+    palette: PAPER_PALETTE
+  }
+};
+const THEME_ORDER = ["dark", "blueprint", "paper"];
+
+// Density is the size counterpart to a theme, and deliberately uses the exact
+// same mechanism — a token block toggled by an attribute on <html>. Compact
+// reproduces the pre-2.7 metrics; it does NOT reproduce the sub-44pt tap
+// targets, which were a defect rather than a density.
+const DENSITIES = {
+  comfortable: {
+    label: "Comfortable",
+    hint: "larger type, room to tap — the default on iPad"
+  },
+  compact: {
+    label: "Compact",
+    hint: "the older, tighter metrics — more on screen at once"
+  }
+};
+const DENSITY_ORDER = ["comfortable", "compact"];
 const tracePalette = P => ({
   ...PRINT_PALETTE,
   id: P.id,
@@ -3411,6 +3877,7 @@ const renderMarkupEls = (items, {
   keyPrefix = "mk",
   fmt,
   paper,
+  ink,
   ts = 1
 }) => {
   const FS = n => +(n * ts).toFixed(2);
@@ -3424,7 +3891,12 @@ const renderMarkupEls = (items, {
   (items || []).forEach((m, i) => {
     if (!m) return;
     const key = `${keyPrefix}-${m.id ?? i}`;
-    const col = m.color || "#FF3B30";
+    // `auto` becomes this palette's linework colour here and only here — the
+    // stored stroke is left alone, so the same design prints black on the
+    // submittal and draws white on the blueprint.
+    const col = resolveMarkupColor(m.color, {
+      line: ink
+    });
     const sw = m.w || 2;
     const pts = m.pts || [];
     if (!pts.length) return;
@@ -3625,6 +4097,23 @@ const buildSchematic = (S, BASE_P) => {
   // attributes alone would leave labels colliding and clipped.
   const TS = S.textScale || 1;
   const FS = n => +(n * TS).toFixed(2);
+
+  // Design flag AND view filter. Every drawing site below uses these, never the
+  // raw flags, so a view can never alter what the job contains.
+  const V = VIEW_PRESETS[S.view] || VIEW_PRESETS.full;
+  const F = V.force || {};
+  // on(group, toggle): the view must allow the group, and either the user asked
+  // for it or the view guarantees it (derived aids only — see VIEW_PRESETS).
+  const on = (g, t) => !!V[g] && (!!t || !!F[g]);
+  const vVesa = on("vesa", showVesa);
+  const vPwr = on("pwr", showOutlet);
+  const vLv = on("lv", showLowVolt);
+  const vTape = on("tape", showTapeOut);
+  const vTvDims = on("tvDims", showTvDims);
+  const vBoxDim = on("box", showBoxDims);
+  const vBox = !!V.box;
+  const vMount = !!V.mount;
+  const vTravel = showTravel && !!V.mount;
   const P = traceOn ? tracePalette(BASE_P) : BASE_P;
   const fmt = v => fmtIn(v, dispUnits);
 
@@ -3678,7 +4167,16 @@ const buildSchematic = (S, BASE_P) => {
   // Right: leader rail (when callouts shown) + wall-height dim, both lane-aware.
   // Spelled-out labels need a wider rail (worst case: "LOW VOLTAGE 5' - 3 1/8" ABOVE FLOOR").
   const railW = (fullWords ? 250 : 148) * TS; // reserved for callout pills — scales with the type
-  const hasRail = layout && (showVesa || layout.box || showOutlet || showLowVolt);
+  // Which callouts will actually register on the rail. hasRail (which reserves
+  // HORIZONTAL space) and the packing simulation below (which reserves VERTICAL
+  // space) must be driven by the same predicates: a pill that packs but wasn't
+  // reserved lands on the wall-height dimension. That is exactly what happened
+  // when Tape-out became the first view whose rail holds only a tape pill.
+  const railHasVesa = !!(layout && layout.vesa && vVesa);
+  const railHasBox = !!(layout && layout.box && vBox);
+  const railHasSanus = !!(layout && vMount && layout.mount?.system === "sanus");
+  const railHasTravel = !!(layout && vTravel && S.mountSystem === "fa" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0);
+  const hasRail = !!layout && (railHasVesa || railHasBox || vPwr || vLv || vTape || railHasSanus || railHasTravel);
   let hDimRelX = safeWallW * scale + 32; // relative to wallX
   if (hasRail) {
     const tvRightRel = layout.tvRight * scale;
@@ -3702,36 +4200,36 @@ const buildSchematic = (S, BASE_P) => {
     const wallPxHRel = safeWallH * scale;
     const relY = aff => wallPxHRel - aff * scale;
     const ents = [];
-    if (layout.vesa && showVesa) ents.push({
+    if (railHasVesa) ents.push({
       a: relY(layout.vesa.aff + layout.vesa.h / 2),
       n: 2
     });
-    if (layout.box) ents.push({
+    if (railHasBox) ents.push({
       a: relY(layout.box.aff),
-      n: 2 + (layout.box.extendsOff ? 1 : 0) + (showBoxDims ? 2 + (hasFireplace && hasMantel ? 1 : 0) : 0)
+      n: 2 + (layout.box.extendsOff ? 1 : 0) + (vBoxDim ? 2 + (hasFireplace && hasMantel ? 1 : 0) : 0)
     });
-    if (showOutlet) ents.push({
+    if (vPwr) ents.push({
       a: relY(layout.outlet.aff),
       n: 2
     });
-    if (showLowVolt) ents.push({
+    if (vLv) ents.push({
       a: relY(layout.lv.aff),
       n: 2
     });
-    if (showTapeOut) ents.push({
+    if (vTape) ents.push({
       a: relY(layout.tvTop),
       n: 2
     });
-    if (layout.mount?.system === "sanus") ents.push({
+    if (railHasSanus) ents.push({
       a: relY(layout.vesa ? layout.vesa.aff : layout.centerH),
       n: 2
     });
-    if (showTravel && S.mountSystem === "fa" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0) ents.push({
+    if (railHasTravel) ents.push({
       a: relY(layout.tvTop + travelIn),
       n: 2
     });
     const relTvTop = relY(layout.tvTop);
-    const topFloor = showTvDims ? relTvTop + 2 - 12 : 10;
+    const topFloor = vTvDims ? relTvTop + 2 - 12 : 10;
     let prevTop = -Infinity,
       prevH = 0;
     ents.map((e, i) => ({
@@ -3780,7 +4278,10 @@ const buildSchematic = (S, BASE_P) => {
   const svgW = wallPxW + leftPad + uL + rightPad + uR;
   const svgH = wallPxH + topPad + uT + bottomPad + uB;
   const elements = [];
-  const K = k => `${P.id}-${k}`; // unique keys/ids per palette render
+  // Unique per palette AND view: the multi-page PDF puts several renders in one
+  // document, and a shared id (the underlay clipPath) would make every page clip
+  // to whichever page the browser parsed first.
+  const K = k => `${P.id}-${S.view || "full"}-${k}`;
   // Index where the ANNOTATION layer starts — callout pills, dimension lines
   // and every dimension label. Hand markup is spliced in here rather than
   // appended, so a redline can never strike through the drawing's own
@@ -3835,6 +4336,7 @@ const buildSchematic = (S, BASE_P) => {
       keyPrefix: K("mask"),
       fmt,
       paper: P.maskFill,
+      ink: P.line,
       ts: TS
     }).forEach(el => elements.push(el));
   }
@@ -4022,7 +4524,7 @@ const buildSchematic = (S, BASE_P) => {
       vesaCenterY = floorY - layout.vesa.aff * scale;
       const mountPxW = (layout.mount?.system === "sanus" ? layout.mount.plateW : layout.vesa.w + (layout.mount?.system === "fa" ? 3 : 2)) * scale;
       const mountPxH = (layout.mount?.system === "sanus" ? layout.mount.plateH : layout.mount?.system === "fa" ? layout.vesa.h + 2 : 3.5) * scale;
-      elements.push(/*#__PURE__*/React.createElement("rect", {
+      if (vMount) elements.push(/*#__PURE__*/React.createElement("rect", {
         key: K("mount"),
         x: vesaCenterX - mountPxW / 2,
         y: vesaCenterY - mountPxH / 2,
@@ -4047,7 +4549,7 @@ const buildSchematic = (S, BASE_P) => {
       bbX = wallX + (layout.box.cx - layout.box.w / 2) * scale;
       bbY = floorY - (layout.box.aff + layout.box.h / 2) * scale;
       const c = layout.box.extendsOff ? P.boxBad : P.box;
-      elements.push(/*#__PURE__*/React.createElement("rect", {
+      if (vBox) elements.push(/*#__PURE__*/React.createElement("rect", {
         key: K("bb"),
         x: bbX,
         y: bbY,
@@ -4059,7 +4561,7 @@ const buildSchematic = (S, BASE_P) => {
         strokeWidth: "1.8",
         strokeDasharray: "8 4"
       }));
-      if (showBoxDims) {
+      if (vBoxDim) {
         // emphasized bottom edge — the FA set line in the field
         elements.push(/*#__PURE__*/React.createElement("line", {
           key: K("bb-btm"),
@@ -4072,7 +4574,7 @@ const buildSchematic = (S, BASE_P) => {
         }));
       }
     }
-    if (showVesa && layout.vesa) {
+    if (vVesa && layout.vesa) {
       const vLeft = vesaCenterX - vesaPxW / 2;
       const vTop = vesaCenterY - vesaPxH / 2;
       elements.push(/*#__PURE__*/React.createElement("rect", {
@@ -4126,7 +4628,7 @@ const buildSchematic = (S, BASE_P) => {
       return `${fmt(Math.abs(d))} ${d < 0 ? fullWords ? "LEFT" : "LT" : fullWords ? "RIGHT" : "RT"} OF ${W.CL}`;
     };
     const rail = [];
-    if (showVesa && layout.vesa) {
+    if (railHasVesa) {
       rail.push({
         id: "vesa",
         color: P.vesa,
@@ -4141,7 +4643,7 @@ const buildSchematic = (S, BASE_P) => {
         }]
       });
     }
-    if (layout.box) {
+    if (railHasBox) {
       const c = layout.box.extendsOff ? P.boxBad : P.box;
       const lines = [{
         text: layout.box.label,
@@ -4154,7 +4656,7 @@ const buildSchematic = (S, BASE_P) => {
         text: "! EXTENDS BEYOND TV",
         size: 9
       });
-      if (showBoxDims) {
+      if (vBoxDim) {
         lines.push({
           text: `BOX ${W.BTM} ${fmt(layout.box.btm)} ${W.AFF}`,
           size: 9
@@ -4177,7 +4679,7 @@ const buildSchematic = (S, BASE_P) => {
         lines
       });
     }
-    if (showOutlet) {
+    if (vPwr) {
       const ox = wallX + layout.outlet.x * scale;
       const oy = floorY - layout.outlet.aff * scale;
       elements.push(/*#__PURE__*/React.createElement("rect", {
@@ -4218,7 +4720,7 @@ const buildSchematic = (S, BASE_P) => {
         }]
       });
     }
-    if (showLowVolt) {
+    if (vLv) {
       const lx = wallX + layout.lv.x * scale;
       const ly = floorY - layout.lv.aff * scale;
       elements.push(/*#__PURE__*/React.createElement("rect", {
@@ -4255,7 +4757,7 @@ const buildSchematic = (S, BASE_P) => {
         }]
       });
     }
-    if (showTapeOut) {
+    if (vTape) {
       rail.push({
         id: "tape",
         color: P.tape,
@@ -4270,7 +4772,7 @@ const buildSchematic = (S, BASE_P) => {
         }]
       });
     }
-    if (layout.mount?.system === "sanus") {
+    if (railHasSanus) {
       rail.push({
         id: "mnt",
         color: P.mount,
@@ -4285,7 +4787,7 @@ const buildSchematic = (S, BASE_P) => {
         }]
       });
     }
-    if (showTravel && S.mountSystem === "fa" && layout.box && layout.box.brand === "Future Automation" && travelIn > 0) {
+    if (railHasTravel) {
       const t = travelIn * scale;
       const yT = tvY - t,
         yB = tvY + tvPxH + t;
@@ -4352,7 +4854,7 @@ const buildSchematic = (S, BASE_P) => {
     }
     labelStart = elements.length;
     const railX = tvX + tvPxW + 16;
-    packRail(rail, showTvDims ? tvY + 2 : wallY + 10, TS).forEach(e => {
+    packRail(rail, vTvDims ? tvY + 2 : wallY + 10, TS).forEach(e => {
       elements.push(/*#__PURE__*/React.createElement("line", {
         key: K(`${e.id}-leader`),
         x1: e.anchor[0],
@@ -4451,7 +4953,7 @@ const buildSchematic = (S, BASE_P) => {
 
     // width (top, lane 0)
     const dimY = tvY - 18;
-    if (showTvDims) {
+    if (vTvDims) {
       const wTxt = `${fmt(tvW)} W × ${fmt(tvH)} H`;
       elements.push(/*#__PURE__*/React.createElement("line", {
         key: K("dw"),
@@ -4571,7 +5073,7 @@ const buildSchematic = (S, BASE_P) => {
     }, clTxt));
 
     // tape-out mode: the four lines an installer actually snaps on the wall
-    if (showTapeOut) {
+    if (vTape) {
       const tTop = floorY - layout.tvTop * scale;
       const tBtm = floorY - layout.tvBottom * scale;
       [["t-top", tTop, `TOP ${fmt(layout.tvTop)} ${W.AFF}`], ["t-btm", tBtm, `${W.BTM} ${fmt(layout.tvBottom)} ${W.AFF}`]].forEach(([id, y, txt]) => {
@@ -4777,6 +5279,7 @@ const buildSchematic = (S, BASE_P) => {
       keyPrefix: K("mk"),
       fmt,
       paper: P.maskFill,
+      ink: P.line,
       ts: TS
     });
     elements.splice(labelStart < 0 ? elements.length : labelStart, 0, ...inkEls);
@@ -5258,6 +5761,99 @@ const sweepConfigs = () => {
     showTapeOut: true,
     isMobile: true,
     viewportW: 375
+  });
+
+  // ---- task views ------------------------------------------------------
+  // Every config above renders the Full view (base has no `view`, and
+  // buildSchematic falls back to full). A view repacks the leader rail from a
+  // different subset, so a page that is fine at Full can still collide — and
+  // Tape-out/Mount force their own guides on regardless of the toggles. Sweep
+  // each view against the cases that stress label width: full words with ft-in
+  // (the longest strings), a narrow phone viewport, a cramped wall, a giant
+  // wall, and the largest text scale.
+  const viewStress = [{
+    n: "fullwords ftin fp",
+    brand: "Sony",
+    selectedSize: 65,
+    mountSystem: "fa",
+    dispUnits: "ftin",
+    hasFireplace: true,
+    fullWords: true
+  }, {
+    n: "mobile 375",
+    brand: "Samsung",
+    selectedSize: 75,
+    mountSystem: "sanus",
+    sanusStyle: "fullmotion",
+    dispUnits: "frac",
+    hasFireplace: false,
+    isMobile: true,
+    viewportW: 375
+  }, {
+    n: "cramped 60x72",
+    brand: "Samsung",
+    selectedSize: 32,
+    wallW: 60,
+    wallH: 72,
+    mountSystem: "fa",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    heightRef: "bottom",
+    fullWords: true
+  }, {
+    n: "giant wall 115",
+    brand: "Samsung",
+    selectedSize: 115,
+    wallW: 300,
+    wallH: 140,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "ftin",
+    hasFireplace: false
+  }, {
+    n: "XL text offset TV",
+    brand: "LG",
+    selectedSize: 55,
+    mountSystem: "sanus",
+    sanusStyle: "fixed",
+    dispUnits: "dec",
+    hasFireplace: false,
+    tvOffsetIn: -25,
+    textScale: TEXT_SCALES[TEXT_SCALES.length - 1].v
+  }];
+  VIEW_ORDER.filter(v => v !== "full").forEach(view => viewStress.forEach(c => cfgs.push({
+    ...base,
+    ...c,
+    name: `view:${view} ${c.n}`,
+    view
+  })));
+  // Tape-out and Mount must not be blank when their Settings toggle is off —
+  // they force their own guides. Sweep that path explicitly, since every other
+  // tape config above sets showTapeOut: true.
+  cfgs.push({
+    ...base,
+    name: "view:tapeout forced (toggle off)",
+    brand: "Sony",
+    selectedSize: 75,
+    mountSystem: "fa",
+    dispUnits: "ftin",
+    hasFireplace: true,
+    fullWords: true,
+    view: "tapeout",
+    showTapeOut: false
+  });
+  cfgs.push({
+    ...base,
+    name: "view:mount forced (toggle off)",
+    brand: "Sony",
+    selectedSize: 75,
+    mountSystem: "sanus",
+    sanusStyle: "fullmotion",
+    dispUnits: "ftin",
+    hasFireplace: false,
+    fullWords: true,
+    view: "mount",
+    showVesa: false
   });
   return cfgs;
 };
@@ -5972,6 +6568,13 @@ const Icon = ({
     }
   }, p[name]);
 };
+
+// Sections inside a Stage are single-open. The provider carries the open key so
+// Sec does not need to know it is in a group — outside one it keeps its own
+// state, which is what the Data screen and any future standalone use rely on.
+// React.useContext, not the bare hook: dev.html injects only useState/useMemo/
+// useRef/useEffect into scope, so anything else has to come off React itself.
+const SecGroup = React.createContext(null);
 const Sec = ({
   icon,
   title,
@@ -5980,14 +6583,17 @@ const Sec = ({
   defaultOpen = true,
   summary
 }) => {
-  const [open, setOpen] = useState(defaultOpen);
+  const grp = React.useContext(SecGroup);
+  const [solo, setSolo] = useState(defaultOpen);
+  const open = grp ? grp.open === title : solo;
+  const toggle = () => grp ? grp.set(grp.open === title ? null : title) : setSolo(o => !o);
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      marginTop: first ? 0 : 22
+      marginTop: grp ? 0 : first ? 0 : 22
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "sec-title sec-clk",
-    onClick: () => setOpen(o => !o)
+    onClick: toggle
   }, /*#__PURE__*/React.createElement(Icon, {
     name: icon
   }), " ", title, /*#__PURE__*/React.createElement("span", {
@@ -5995,6 +6601,44 @@ const Sec = ({
   }, !open && summary ? summary : ""), /*#__PURE__*/React.createElement("span", {
     className: `sec-chev ${open ? "" : "closed"}`
   }, "▾")), open && children);
+};
+
+// A STAGE is one step of the job. Only the active stage renders its controls;
+// the rest collapse to a summary row you can tap to jump to. The sidebar used
+// to stack ~34 rows — about 2.4 screens — before a TV was even chosen, which is
+// the same "too much at once" problem the drawing views solved.
+const Stage = ({
+  id,
+  name,
+  note,
+  summary,
+  active,
+  onPick,
+  defaultSec,
+  children
+}) => {
+  const [openSec, setOpenSec] = useState(defaultSec || null);
+  return /*#__PURE__*/React.createElement("div", {
+    className: `stg ${active ? "on" : ""}`
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "stg-head",
+    onClick: () => onPick(id),
+    title: active ? `${name} — open` : `Go to ${name}`
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "stage-name"
+  }, name), /*#__PURE__*/React.createElement("span", {
+    className: "stage-note"
+  }, active ? note : summary || note), /*#__PURE__*/React.createElement("span", {
+    className: `sec-chev ${active ? "" : "closed"}`
+  }, "▾")), active && /*#__PURE__*/React.createElement("div", {
+    className: "stg-body"
+  }, /*#__PURE__*/React.createElement(SecGroup.Provider, {
+    value: {
+      open: openSec,
+      set: setOpenSec
+    }
+  }, children)));
 };
 const Field = ({
   label,
@@ -6069,6 +6713,12 @@ function App() {
   const [showBoxDims, setShowBoxDims] = useState(SAVED.showBoxDims ?? true);
   const [showTvDims, setShowTvDims] = useState(SAVED.showTvDims ?? true);
   const [showTapeOut, setShowTapeOut] = useState(SAVED.showTapeOut ?? false);
+  const [multiPagePdf, setMultiPagePdf] = useState(SAVED.multiPagePdf ?? true);
+  const [theme, setTheme] = useState(THEMES[SAVED.theme] ? SAVED.theme : "dark");
+  const [density, setDensity] = useState(DENSITIES[SAVED.density] ? SAVED.density : "comfortable");
+  const [stage, setStage] = useState(SAVED.stage || "start");
+  const stageOn = id => stage === "all" || stage === id;
+  const pickStage = id => setStage(cur => cur === id ? cur : id);
   const [showTravel, setShowTravel] = useState(SAVED.showTravel ?? true);
   const [bracketTravel, setBracketTravel] = useState(SAVED.bracketTravel ?? "1.5");
   const [fullWords, setFullWords] = useState(SAVED.fullWords ?? false);
@@ -6102,6 +6752,8 @@ function App() {
   const [tool, setTool] = useState("off"); // "off" | "move" | one of MARKUP_TOOLS
   const [textScale, setTextScale] = useState(TEXT_SCALES.some(t => t.v === SAVED.textScale) ? SAVED.textScale : 1);
   const [trace, setTrace] = useState(SAVED.trace !== false); // ink tuned for tracing over a scan
+  const [view, setView] = useState(VIEW_PRESETS[SAVED.view] ? SAVED.view : "full");
+  const [showViewMenu, setShowViewMenu] = useState(false);
   const [showData, setShowData] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -6110,12 +6762,15 @@ function App() {
   const [startHidden, setStartHidden] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [catalogRev, setCatalogRev] = useState(0); // bumped when the catalog is edited
-  const [mkColor, setMkColor] = useState(MARKUP_COLORS.includes(SAVED.mkColor) ? SAVED.mkColor : MARKUP_COLORS[0]);
+  const [mkColor, setMkColor] = useState(MARKUP_SWATCHES.includes(SAVED.mkColor) ? SAVED.mkColor : MARKUP_DEFAULT_COLOR);
   const [mkWidth, setMkWidth] = useState(MARKUP_WIDTHS.includes(SAVED.mkWidth) ? SAVED.mkWidth : 2);
   const [draft, setDraft] = useState(null); // stroke in progress
   const [calib, setCalib] = useState(null); // { mode: "two" | "box", pts: [] }
   const [calibAsk, setCalibAsk] = useState(null);
   const [textAsk, setTextAsk] = useState(null);
+  // { risk, run } — a raster/vector export held back because some markup would
+  // land invisible on the export sheet. Never rewrites the drawing on its own.
+  const [exportAsk, setExportAsk] = useState(null);
   const [askValue, setAskValue] = useState("");
   const dragRef = useRef(null);
   const underlayFileRef = useRef(null);
@@ -6171,6 +6826,13 @@ function App() {
   }, []);
   const isMobile = viewportW < 768;
   const isTablet = viewportW >= 768 && viewportW < 1024;
+  // There was no breakpoint above 1024: the sidebar rendered at 320px on a
+  // 13" iPad in landscape and on a 2560px desktop alike.
+  const isWide = viewportW >= 1280;
+  // 1280 is also where the markup bar can hold the full swatch row: at 44pt
+  // per tile it needs ~1080px and wraps below that, stranding CLEAR on its
+  // own line. Narrower than this, swatches collapse into the style menu.
+
   useEffect(() => {
     try {
       const {
@@ -6184,6 +6846,7 @@ function App() {
         trace,
         snapOn,
         textScale,
+        view,
         underlay: underlay ? underlayMeta : null,
         wallW,
         wallH,
@@ -6221,10 +6884,14 @@ function App() {
         projectName,
         clientName,
         revision,
-        dispUnits
+        dispUnits,
+        multiPagePdf,
+        theme,
+        density,
+        stage
       }));
     } catch {/* storage unavailable — run without persistence */}
-  }, [markup, mkColor, mkWidth, trace, snapOn, textScale, underlay, wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits]);
+  }, [markup, mkColor, mkWidth, trace, snapOn, textScale, view, underlay, wallW, wallH, hasFireplace, fbOpeningH, fbOpeningW, fbOffsetX, hasMantel, mantelH, mantelDepth, viewDist, useViewDist, brand, selectedSize, tvOffsetX, mountSystem, sanusStyle, sanusMountModel, tvWeight, showBackBox, backBoxModel, autoRecommendBox, showOutlet, showLowVolt, showVesa, showBoxDims, showTvDims, showTapeOut, showTravel, bracketTravel, fullWords, mountHeightOverride, heightRef, showAllSizes, projectName, clientName, revision, dispUnits, multiPagePdf, theme, density, stage]);
   const resetAll = () => {
     try {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -6356,15 +7023,23 @@ function App() {
     markup,
     trace,
     catalogRev,
-    textScale
+    textScale,
+    view
   };
-  const screenSchem = useMemo(() => buildSchematic(schemState, SCREEN_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale]);
+  const themePalette = THEMES[theme] ? THEMES[theme].palette : SCREEN_PALETTE;
+  const screenSchem = useMemo(() => buildSchematic(schemState, themePalette), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, isMobile, isTablet, viewportW, underlay, markup, trace, catalogRev, textScale, view, theme]);
   const printSchem = useMemo(() => buildSchematic({
     ...schemState,
     isMobile: false,
     isTablet: false,
     viewportW: 1280
-  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, underlay, markup, trace, catalogRev, textScale]);
+  }, PRINT_PALETTE), [wallW, wallH, hasFireplace, fbOpeningW, fbOpeningH, fbOffsetIn, hasMantel, mantelH, mantelDepth, brand, selectedSize, layout, heightRef, mountSystem, showVesa, showOutlet, showLowVolt, showBoxDims, showTvDims, showTapeOut, showTravel, travelIn, fullWords, projectName, clientName, revision, dispUnits, underlay, markup, trace, catalogRev, textScale, view]);
+
+  // PDF, PNG and SVG all serialise printRef, which is ALWAYS the print palette
+  // on white — whatever the screen is showing. So the one ground that matters
+  // for a delivered drawing is that white sheet, and this is the list of
+  // strokes that would arrive on it invisible.
+  const exportRisk = useMemo(() => markupContrastRisk(markup, PRINT_PALETTE), [markup]);
   const svgRef = useRef(null);
   const printRef = useRef(null);
   const fileRef = useRef(null);
@@ -6463,6 +7138,14 @@ function App() {
       if (id) clearTimeout(id);
     };
   }, [screenSchem]);
+  useEffect(() => {
+    const el = document.documentElement;
+    if (theme === "dark") el.removeAttribute("data-theme");else el.setAttribute("data-theme", theme);
+    if (density === "comfortable") el.removeAttribute("data-density");else el.setAttribute("data-density", density);
+    // Keep the iOS status bar / PWA chrome in step with the app background.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme === "paper" ? "#FFFFFF" : theme === "blueprint" ? "#0E2F4E" : "#0B1622");
+  }, [theme, density]);
 
   // ----- reference underlay: import, calibrate, annotate -----------------
   const pdfBufRef = useRef(null); // kept so the page picker can re-render
@@ -7157,6 +7840,66 @@ function App() {
     };
     img.src = url;
   };
+
+  // Serialize one view's print schematic without disturbing the live drawing.
+  // buildSchematic is pure, so each sheet renders into a throwaway root and is
+  // read back — the same offscreen technique the stress sweep uses.
+  const renderViewSvg = viewKey => {
+    const schem = buildSchematic({
+      ...schemState,
+      view: viewKey,
+      isMobile: false,
+      isTablet: false,
+      viewportW: 1280
+    }, PRINT_PALETTE);
+    const host = document.createElement("div");
+    host.style.cssText = "position:absolute;left:-100000px;top:0;";
+    document.body.appendChild(host);
+    const root = ReactDOM.createRoot(host);
+    ReactDOM.flushSync(() => root.render(/*#__PURE__*/React.createElement("svg", {
+      width: schem.svgW,
+      height: schem.svgH,
+      viewBox: `0 0 ${schem.svgW} ${schem.svgH}`,
+      xmlns: "http://www.w3.org/2000/svg"
+    }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("pattern", {
+      id: `grid-${viewKey}`,
+      width: "20",
+      height: "20",
+      patternUnits: "userSpaceOnUse"
+    }, /*#__PURE__*/React.createElement("path", {
+      d: "M 20 0 L 0 0 0 20",
+      fill: "none",
+      stroke: PRINT_PALETTE.grid,
+      strokeWidth: "0.5"
+    }))), /*#__PURE__*/React.createElement("rect", {
+      width: "100%",
+      height: "100%",
+      fill: PRINT_PALETTE.canvas
+    }), /*#__PURE__*/React.createElement("rect", {
+      width: "100%",
+      height: "100%",
+      fill: `url(#grid-${viewKey})`
+    }), /*#__PURE__*/React.createElement("text", {
+      x: schem.svgW - 16,
+      y: 18,
+      textAnchor: "end",
+      fontSize: "9",
+      fill: PRINT_PALETTE.title,
+      fontFamily: "'IBM Plex Mono', monospace",
+      letterSpacing: "2"
+    }, "FRONT ELEVATION"), /*#__PURE__*/React.createElement("text", {
+      x: 16,
+      y: 18,
+      fontSize: "9",
+      fill: PRINT_PALETTE.title,
+      fontFamily: "'IBM Plex Mono', monospace",
+      letterSpacing: "2"
+    }, selectedSize ? `${brand.toUpperCase()} ${selectedSize}"` : ""), schem.elements)));
+    const out = new XMLSerializer().serializeToString(host.querySelector("svg"));
+    root.unmount();
+    host.remove();
+    return out;
+  };
   const exportPDF = () => {
     if (!printRef.current || !selectedSize || !layout) return;
     const svgData = new XMLSerializer().serializeToString(printRef.current);
@@ -7219,6 +7962,27 @@ function App() {
     const vesaNote = layout.vesa && layout.vesa.spec.note ? `<p style="margin:8px 0 0 0;"><strong>${brand} ${selectedSize}":</strong> ${layout.vesa.spec.note}</p>` : "";
     const bbNote = layout.box && layout.box.note ? `<p style="margin:8px 0 0 0;"><strong>Back box:</strong> ${layout.box.note}</p>` : "";
     const ratingNote = layout.box && layout.box.underRated ? `<p style="margin:8px 0 0 0;"><strong>Check rating:</strong> ${layout.box.label} is rated ${layout.box.tvMin}"–${layout.box.tvMax}" — selected ${selectedSize}".</p>` : "";
+
+    // Task sheets. Page 1 is always the whole job — the record drawing plus the
+    // specs, parts and notes. Each sheet after it carries one task's drawing and
+    // nothing else, so a crew member reads only the lines they are about to work
+    // to. The spec and parts tables are NOT repeated: they describe the job, not
+    // the sheet, and reprinting them per page invites someone to work from a
+    // stale copy of a page they didn't notice was partial.
+    const sheets = multiPagePdf ? VIEW_ORDER.filter(v => v !== "full").map(v => ({
+      key: v,
+      label: VIEW_PRESETS[v].label,
+      hint: VIEW_PRESETS[v].hint,
+      svg: renderViewSvg(v)
+    })) : [];
+    const sheetsHtml = sheets.map((sh, i) => `
+<div class="sheet">
+  <div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">SHEET ${i + 2} OF ${sheets.length + 1} · ${sh.label.toUpperCase()}</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
+  <div class="sheet-note">${sh.label} — ${sh.hint}. Partial view: the specifications and parts list on sheet 1 govern the whole job.</div>
+  <div class="schematic-wrap">${sh.svg}</div>
+  <div class="legend-strip">${legendHtml}</div>
+  <div class="footer"><span>Generated ${today} · REV ${revision || "01"}</span><span>NOT TO SCALE — DIMENSIONS GOVERN</span></div>
+</div>`).join("");
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docTitle}</title><style>
 @page { size: letter; margin: 0.5in; }
 body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; margin: 0; padding: 24px; background: white; }
@@ -7238,12 +8002,14 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 .notes-box { background: #F4F7FA; border: 1px solid #8FA8BE; padding: 12px; font-size: 11px; line-height: 1.55; }
 .notes-box h3 { margin: 0 0 8px 0; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #1D3A57; }
 .footer { margin-top: 22px; padding-top: 10px; border-top: 1px solid #C9D6E2; font-size: 9px; color: #5C7186; letter-spacing: 1px; text-transform: uppercase; display: flex; justify-content: space-between; }
+.sheet { page-break-before: always; break-before: page; }
+.sheet-note { font-size: 9.5px; letter-spacing: 0.6px; color: #5C7186; margin: 0 0 10px; text-transform: uppercase; }
 @media print { body { padding: 0; } .no-print { display: none; } }
 .print-btn { position: fixed; top: 12px; right: 12px; padding: 12px 20px; background: #102A43; color: white; border: none; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; font-weight: 600; }
 </style></head><body>
 <button class="print-btn no-print" onclick="window.print()">Print / Save as PDF</button>
-<div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">AV INSTALLATION DRAWING</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
-<div class="schematic-wrap">${svgData}</div>
+<div class="header"><div><div style="font-size:9px;letter-spacing:2.5px;color:#5C7186;text-transform:uppercase;margin-bottom:4px;">AV INSTALLATION DRAWING${sheets.length ? ` · SHEET 1 OF ${sheets.length + 1}` : ""}</div><h1>${docTitle}</h1></div><div class="meta">${metaHtml}</div></div>
+<div class="schematic-wrap">${sheets.length ? renderViewSvg("full") : svgData}</div>
 <div class="legend-strip">${legendHtml}</div>
 <div class="grid2">
 <div><div class="section-label">Specifications</div><table class="spec-table">${specRowsHtml}</table></div>
@@ -7254,6 +8020,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
 </div>
 </div>
 <div class="footer"><span>Generated ${today} · REV ${revision || "01"}</span><span>NOT TO SCALE — DIMENSIONS GOVERN</span></div>
+${sheetsHtml}
 <script>window.addEventListener("load", function() { setTimeout(function() { window.print(); }, 500); });<\/script>
 </body></html>`;
     if (IS_NATIVE()) {
@@ -7266,6 +8033,39 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       w.document.write(html);
       w.document.close();
     } else alert("Please allow pop-ups to export PDF");
+  };
+
+  // ----- export contrast guard -----
+  // Only the three renderers that rasterise or serialise printRef are gated.
+  // JSON stores every colour verbatim and DXF puts markup on its own layer
+  // where the CAD app supplies the colour, so neither can lose a stroke.
+  //
+  // The guard REPORTS; it never rewrites. Someone who drew white over a dark
+  // photo underlay meant it, and silently recolouring their annotation on the
+  // way out would be a worse bug than the one this fixes. Recolouring is
+  // offered as a button they press.
+  const guardExport = (run, what) => {
+    if (!exportRisk.length) {
+      run();
+      return;
+    }
+    setExportAsk({
+      risk: exportRisk,
+      run,
+      what
+    });
+  };
+  // Explicit, user-pressed remap. Only the strokes actually at risk change, and
+  // they change to `auto` rather than to a fixed colour, so they stay legible
+  // on whichever theme this design is opened on next.
+  const autoInkRisky = () => {
+    const bad = new Set(exportRisk.map(r => r.index));
+    setMarkup(ms => ms.map((m, i) => bad.has(i) ? {
+      ...m,
+      color: MARKUP_AUTO
+    } : m));
+    setSel([]);
+    setExportAsk(null);
   };
 
   // ----- handlers -----
@@ -7283,13 +8083,15 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   const auditClean = renderAudit.overlaps === 0 && renderAudit.clipped === 0 && !renderAudit.unbacked;
 
   // ----- shared UI fragments -----
-  const setupPanel = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "stage"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "stage-name"
-  }, "START"), /*#__PURE__*/React.createElement("span", {
-    className: "stage-note"
-  }, "what you are working from")), /*#__PURE__*/React.createElement(Sec, {
+  const setupPanel = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Stage, {
+    id: "start",
+    name: "START",
+    note: "what you are working from",
+    defaultSec: "Project",
+    summary: [projectName, clientName].filter(Boolean).join(" — ") || "no project named",
+    active: stageOn("start"),
+    onPick: pickStage
+  }, /*#__PURE__*/React.createElement(Sec, {
     icon: "doc",
     title: "Project",
     defaultOpen: !SAVED.projectName,
@@ -7477,13 +8279,15 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "RESET SCALE"), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: clearUnderlay
-  }, "REMOVE")))), /*#__PURE__*/React.createElement("div", {
-    className: "stage"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "stage-name"
-  }, "THE WALL"), /*#__PURE__*/React.createElement("span", {
-    className: "stage-note"
-  }, "the surface it goes on")), /*#__PURE__*/React.createElement(Sec, {
+  }, "REMOVE"))))), /*#__PURE__*/React.createElement(Stage, {
+    id: "wall",
+    name: "THE WALL",
+    note: "the surface it goes on",
+    defaultSec: "Wall",
+    summary: `${fmt(wallW)} × ${fmt(wallH)}${hasFireplace ? hasMantel ? " · fireplace + mantel" : " · fireplace" : ""}`,
+    active: stageOn("wall"),
+    onPick: pickStage
+  }, /*#__PURE__*/React.createElement(Sec, {
     icon: "wall",
     title: "Wall",
     summary: `${wallW}" × ${wallH}"`
@@ -7572,13 +8376,15 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     type: "number",
     value: mantelDepth,
     onChange: e => setMantelDepth(+e.target.value || 0)
-  }))))), /*#__PURE__*/React.createElement("div", {
-    className: "stage"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "stage-name"
-  }, "THE TV"), /*#__PURE__*/React.createElement("span", {
-    className: "stage-note"
-  }, "what you are hanging")), /*#__PURE__*/React.createElement(Sec, {
+  })))))), /*#__PURE__*/React.createElement(Stage, {
+    id: "tv",
+    name: "THE TV",
+    note: "what you are hanging",
+    defaultSec: "Brand",
+    summary: selectedSize ? `${brand} ${selectedSize}"` : "no size chosen",
+    active: stageOn("tv"),
+    onPick: pickStage
+  }, /*#__PURE__*/React.createElement(Sec, {
     icon: "tv",
     title: "Brand",
     summary: brand
@@ -7607,13 +8413,15 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     type: "number",
     value: viewDist,
     onChange: e => setViewDist(+e.target.value || 0)
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "stage"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "stage-name"
-  }, "THE HARDWARE"), /*#__PURE__*/React.createElement("span", {
-    className: "stage-note"
-  }, "what holds it up")), /*#__PURE__*/React.createElement(Sec, {
+  })))), /*#__PURE__*/React.createElement(Stage, {
+    id: "hw",
+    name: "THE HARDWARE",
+    note: "what holds it up",
+    defaultSec: "Mount",
+    summary: mountSystem === "fa" ? "Future Automation" : `Sanus ${sanusStyle === "fullmotion" ? "full motion" : sanusStyle}`,
+    active: stageOn("hw"),
+    onPick: pickStage
+  }, /*#__PURE__*/React.createElement(Sec, {
     icon: "mount",
     title: "Mount",
     summary: mountSystem === "fa" ? "Future Automation" : `Sanus ${sanusStyle === "fullmotion" ? "full motion" : sanusStyle}`
@@ -7681,7 +8489,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, "Panel: ", specPanel.weightLbs, " lbs (spec) — ", specPanel.model), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: "var(--fs-tag)",
       opacity: 0.6,
       marginTop: 3
     }
@@ -7870,13 +8678,20 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, vesaSpec.note), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: "var(--fs-tag)",
       marginTop: 6,
       paddingTop: 6,
       borderTop: "1px dashed currentColor",
       opacity: 0.8
     }
-  }, "Verify with spec sheet before drilling"))));
+  }, "Verify with spec sheet before drilling")))), /*#__PURE__*/React.createElement("div", {
+    className: "stg-all"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "chip",
+    onClick: () => setStage(stage === "all" ? "start" : "all"),
+    title: stage === "all" ? "Show one stage at a time" : "Show every section at once"
+  }, stage === "all" ? "BY STAGE" : "ALL SECTIONS")));
   const sizeStrip = /*#__PURE__*/React.createElement("div", {
     className: "size-strip-wrap"
   }, /*#__PURE__*/React.createElement("div", {
@@ -7959,6 +8774,30 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     onClick: () => setShowSettings(false)
   }, "DONE")), /*#__PURE__*/React.createElement("div", {
     className: "set-group"
+  }, "APPEARANCE"), /*#__PURE__*/React.createElement(SettingsRow, {
+    label: "Theme",
+    hint: THEMES[theme].hint
+  }, /*#__PURE__*/React.createElement(Seg, {
+    small: true,
+    options: THEME_ORDER.map(k => ({
+      value: k,
+      label: THEMES[k].label.toUpperCase()
+    })),
+    value: theme,
+    onChange: setTheme
+  })), /*#__PURE__*/React.createElement(SettingsRow, {
+    label: "Density",
+    hint: DENSITIES[density].hint
+  }, /*#__PURE__*/React.createElement(Seg, {
+    small: true,
+    options: DENSITY_ORDER.map(k => ({
+      value: k,
+      label: DENSITIES[k].label.toUpperCase()
+    })),
+    value: density,
+    onChange: setDensity
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "set-group"
   }, "ANNOTATIONS"), /*#__PURE__*/React.createElement(SettingsRow, {
     label: "Power outlet",
     hint: "Recessed outlet — drawing, parts list, PDF"
@@ -7995,7 +8834,13 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, /*#__PURE__*/React.createElement(Check, {
     on: showTapeOut,
     onClick: () => setShowTapeOut(!showTapeOut)
-  }, "TAPE-OUT")), /*#__PURE__*/React.createElement("div", {
+  }, "TAPE-OUT")), /*#__PURE__*/React.createElement(SettingsRow, {
+    label: "Multi-page PDF",
+    hint: "One sheet per task — full drawing, then layout, rough-in, mount and tape-out"
+  }, /*#__PURE__*/React.createElement(Check, {
+    on: multiPagePdf,
+    onClick: () => setMultiPagePdf(!multiPagePdf)
+  }, "SHEETS")), /*#__PURE__*/React.createElement("div", {
     className: "set-group"
   }, "LABELS"), /*#__PURE__*/React.createElement(SettingsRow, {
     label: "Spell out abbreviations",
@@ -8145,7 +8990,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "diag-row"
   }, /*#__PURE__*/React.createElement("span", null, f.name), /*#__PURE__*/React.createElement("span", {
     className: "f"
-  }, f.pairs.join(" | "))))), ["golden", "format", "interop", "invariant"].map(g => /*#__PURE__*/React.createElement("div", {
+  }, f.pairs.join(" | "))))), [...new Set(selfTest.results.map(r => r.group))].sort((a, b) => (DIAG_GROUP_ORDER.indexOf(a) + 1 || 99) - (DIAG_GROUP_ORDER.indexOf(b) + 1 || 99)).map(g => /*#__PURE__*/React.createElement("div", {
     key: g
   }, /*#__PURE__*/React.createElement("div", {
     className: "diag-group"
@@ -8180,7 +9025,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "menu-item primary",
     onClick: () => {
       setShowExport(false);
-      exportPack();
+      guardExport(exportPack, "FULL PACK");
     }
   }, "★ FULL PACK", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
@@ -8190,7 +9035,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "menu-item",
     onClick: () => {
       setShowExport(false);
-      exportPDF();
+      guardExport(exportPDF, "PDF");
     }
   }, "PDF", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
@@ -8216,7 +9061,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "menu-item",
     onClick: () => {
       setShowExport(false);
-      exportPNG();
+      guardExport(exportPNG, "PNG");
     }
   }, "PNG", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
@@ -8224,11 +9069,19 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "menu-item",
     onClick: () => {
       setShowExport(false);
-      exportSVG();
+      guardExport(exportSVG, "SVG");
     }
   }, "SVG", /*#__PURE__*/React.createElement("span", {
     className: "menu-sub"
-  }, "blueline vector image"))))));
+  }, "blueline vector image"))))), exportRisk.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "ink-warn",
+    onClick: () => setExportAsk({
+      risk: exportRisk,
+      run: null,
+      what: null
+    }),
+    title: "Some markup would be invisible in the PDF, PNG and SVG — click for the list"
+  }, "▲ ", exportRisk.length, " INVISIBLE ON PAPER"));
 
   // The way IN. Two labelled choices rather than one guess-the-type button:
   // a reference drawing is a backdrop you trace, a data file rewrites your
@@ -8274,7 +9127,31 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "menu-sep"
   }), /*#__PURE__*/React.createElement("div", {
     className: "menu-note"
-  }, "…or drag a file straight onto the drawing")))), /*#__PURE__*/React.createElement("button", {
+  }, "…or drag a file straight onto the drawing")))), /*#__PURE__*/React.createElement("div", {
+    className: "menu-wrap"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `btn ghost ${view !== "full" ? "flagged" : ""}`,
+    onClick: () => setShowViewMenu(v => !v),
+    title: "Filter the drawing for what you are doing right now"
+  }, VIEW_PRESETS[view].label.toUpperCase(), " ▾"), showViewMenu && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "menu-backdrop",
+    onClick: () => setShowViewMenu(false)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "menu"
+  }, VIEW_ORDER.map(k => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: `menu-item ${view === k ? "primary" : ""}`,
+    onClick: () => {
+      setView(k);
+      setShowViewMenu(false);
+    }
+  }, VIEW_PRESETS[k].label, /*#__PURE__*/React.createElement("span", {
+    className: "menu-sub"
+  }, VIEW_PRESETS[k].hint))), /*#__PURE__*/React.createElement("div", {
+    className: "menu-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "menu-note"
+  }, "Filters the drawing only — the parts list and specs always describe the whole job. Tape-out and Mount draw their own guides even if those are switched off in Settings.")))), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost icon-btn",
     onClick: () => setShowSettings(true),
     title: "Settings — what appears on the drawing: annotations, labels, units, snapping",
@@ -8356,17 +9233,6 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "DISMISS"));
 
   // ----- markup toolbar (sits directly over the drawing) -----
-  const TOOL_LABEL = {
-    move: "MOVE",
-    select: "SELECT",
-    mask: "BLANK",
-    pen: "PEN",
-    line: "LINE",
-    arrow: "ARROW",
-    rect: "BOX",
-    text: "TEXT",
-    measure: "MEASURE"
-  };
   const pickTool = t => {
     calibPtsRef.current = [];
     draftRef.current = null;
@@ -8393,6 +9259,44 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     });
     setUnderlayNote(mode === "two" ? "Click both ends of a dimension you know, then type its real length" : "Drag a box across the TV shown on the drawing");
   };
+
+  // A swatch says two things: which colour it paints, and whether that colour
+  // will still be there afterwards. The export sheet is ALWAYS the print
+  // palette's white, whatever theme the screen is on, so "will it survive" is
+  // two separate questions and the title answers whichever one is failing.
+  const swatchNote = c => {
+    if (c === MARKUP_AUTO) return "AUTO — follows the paper: light on the blueprint, dark on the printed sheet. Always survives export.";
+    const okScreen = markupColorSafeOn(c, themePalette);
+    const okPrint = markupColorSafeOn(c, PRINT_PALETTE);
+    if (okScreen && okPrint) return c;
+    if (!okScreen && !okPrint) return `${c} — nearly invisible in this theme AND on the white export sheet`;
+    if (!okPrint) return `${c} — fine on screen, but invisible in the PDF, PNG and SVG (they always print on white)`;
+    return `${c} — exports fine, but nearly invisible against this theme`;
+  };
+  const swatchBtn = c => {
+    const auto = c === MARKUP_AUTO;
+    const active = (solo ? solo.color : mkColor) === c;
+    const risky = !auto && !(markupColorSafeOn(c, themePalette) && markupColorSafeOn(c, PRINT_PALETTE));
+    return /*#__PURE__*/React.createElement("button", {
+      key: c,
+      type: "button",
+      className: `mk-sw ${active ? "on" : ""} ${risky ? "risky" : ""}`,
+      style: auto ? {
+        background: `linear-gradient(135deg, ${themePalette.line} 0 50%, ${PRINT_PALETTE.line} 50% 100%)`
+      } : {
+        background: c
+      },
+      onClick: () => {
+        setMkColor(c);
+        if (sel.length) patchSel(m => ({
+          ...m,
+          color: c
+        }));
+      },
+      title: sel.length ? `Recolour the selection — ${swatchNote(c)}` : swatchNote(c),
+      "aria-label": auto ? "auto ink colour, follows the drawing" : `colour ${c}`
+    });
+  };
   const markupBar = /*#__PURE__*/React.createElement("div", {
     className: "mk-bar"
   }, /*#__PURE__*/React.createElement("button", {
@@ -8410,22 +9314,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     title: t === "mask" ? "Paint over part of the reference drawing so the schematic reads clearly" : undefined
   }, TOOL_LABEL[t])), /*#__PURE__*/React.createElement("span", {
     className: "mk-sep"
-  }), !isMobile && !isTablet ? /*#__PURE__*/React.createElement(React.Fragment, null, MARKUP_COLORS.map(c => /*#__PURE__*/React.createElement("button", {
-    key: c,
-    className: `mk-sw ${(solo ? solo.color : mkColor) === c ? "on" : ""}`,
-    style: {
-      background: c
-    },
-    onClick: () => {
-      setMkColor(c);
-      if (sel.length) patchSel(m => ({
-        ...m,
-        color: c
-      }));
-    },
-    title: sel.length ? "Recolour the selection" : c,
-    "aria-label": `colour ${c}`
-  })), MARKUP_WIDTHS.map(w => /*#__PURE__*/React.createElement("button", {
+  }), isWide ? /*#__PURE__*/React.createElement(React.Fragment, null, MARKUP_SWATCHES.map(swatchBtn), MARKUP_WIDTHS.map(w => /*#__PURE__*/React.createElement("button", {
     key: w,
     className: `chip ${(solo ? solo.w : mkWidth) === w ? "on" : ""}`,
     onClick: () => {
@@ -8443,7 +9332,9 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     title: "Pen colour and weight"
   }, /*#__PURE__*/React.createElement("span", {
     className: "mk-sw sm",
-    style: {
+    style: (solo ? solo.color : mkColor) === MARKUP_AUTO ? {
+      background: `linear-gradient(135deg, ${themePalette.line} 0 50%, ${PRINT_PALETTE.line} 50% 100%)`
+    } : {
       background: solo ? solo.color : mkColor
     }
   }), (solo ? solo.w : mkWidth) === 1 ? "THIN" : (solo ? solo.w : mkWidth) === 2 ? "MED" : "BOLD", " ▾"), showStyle && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -8465,21 +9356,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       gap: 6,
       marginBottom: 10
     }
-  }, MARKUP_COLORS.map(c => /*#__PURE__*/React.createElement("button", {
-    key: c,
-    className: `mk-sw ${(solo ? solo.color : mkColor) === c ? "on" : ""}`,
-    style: {
-      background: c
-    },
-    onClick: () => {
-      setMkColor(c);
-      if (sel.length) patchSel(m => ({
-        ...m,
-        color: c
-      }));
-    },
-    "aria-label": `colour ${c}`
-  }))), /*#__PURE__*/React.createElement("div", {
+  }, MARKUP_SWATCHES.map(swatchBtn)), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 6
@@ -8666,12 +9543,92 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     }
   }, "APPLY"))));
 
+  // Named, not counted: "3 strokes are invisible" sends you hunting. The list
+  // says which ones, in drawing order, each with the colour it was drawn in.
+  const inkDialog = exportAsk && (() => {
+    const risk = exportAsk.risk || [];
+    const shown = risk.slice(0, 8);
+    return /*#__PURE__*/React.createElement("div", {
+      className: "ask-wrap",
+      onClick: () => setExportAsk(null)
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "ask",
+      style: {
+        width: "min(420px, 100%)"
+      },
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "rec-tag",
+      style: {
+        color: "var(--warn)"
+      }
+    }, risk.length, " MARKUP ", risk.length === 1 ? "STROKE" : "STROKES", " WON'T PRINT", exportAsk.what ? ` — ${exportAsk.what}` : ""), /*#__PURE__*/React.createElement("div", {
+      className: "hint",
+      style: {
+        marginTop: 6,
+        lineHeight: 1.55
+      }
+    }, "PDF, PNG and SVG always render on the white submittal sheet, whatever theme the screen is on. ", risk.length === 1 ? "This stroke was" : "These were", " drawn in a colour too close to that white to see."), /*#__PURE__*/React.createElement("div", {
+      className: "ink-list"
+    }, shown.map(r => /*#__PURE__*/React.createElement("div", {
+      className: "ink-row",
+      key: `${r.id}-${r.index}`
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "ink-chip",
+      style: {
+        background: r.color
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "ink-name"
+    }, r.label), /*#__PURE__*/React.createElement("span", {
+      className: "ink-hex"
+    }, r.color.toUpperCase()))), risk.length > shown.length && /*#__PURE__*/React.createElement("div", {
+      className: "ink-row"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "ink-name"
+    }, "+ ", risk.length - shown.length, " more"))), /*#__PURE__*/React.createElement("div", {
+      className: "hint",
+      style: {
+        marginTop: 8,
+        lineHeight: 1.55
+      }
+    }, "If you drew light on purpose — over a dark photo underlay, say — export anyway; nothing here changes your drawing unless you ask it to."), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        marginTop: 12,
+        justifyContent: "flex-end",
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost",
+      onClick: () => setExportAsk(null)
+    }, "CANCEL"), /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost",
+      onClick: autoInkRisky,
+      title: "Switch just these strokes to AUTO — dark on paper, light on the blueprint"
+    }, "SET TO AUTO INK"), exportAsk.run && /*#__PURE__*/React.createElement("button", {
+      className: "btn",
+      title: `Export the ${exportAsk.what} with these strokes as drawn`,
+      onClick: () => {
+        const go = exportAsk.run;
+        setExportAsk(null);
+        go();
+      }
+    }, "EXPORT ANYWAY"))));
+  })();
+
   // live overlay: the stroke under the user's finger and the calibration pick
+  // The in-progress stroke draws on the SCREEN palette, so it must be handed
+  // that palette's ink and paper — otherwise an `auto` stroke would flip colour
+  // the instant the drag ended and it moved into the schematic.
   const frame = {
     wallX: screenSchem.wallX,
     floorY: screenSchem.floorY,
     scale: screenSchem.scale,
-    fmt
+    fmt,
+    paper: screenSchem.P.maskFill,
+    ink: screenSchem.P.line
   };
   const calibOverlay = calib && (() => {
     const els = [];
@@ -9005,51 +9962,112 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
     className: "app"
   }, /*#__PURE__*/React.createElement("style", null, `
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+        /* Dark is the default token set; a theme overrides only what changes.
+           --warn-txt / --amber-txt / --acc-txt exist because the tinted notice
+           boxes used to hardcode pale tints (#FFB4AC, #F0D9A0, #B8E8EF) that
+           are legible on near-black and invisible on paper. */
         :root {
           --ink: #0B1622; --ink2: #0D1B2A; --panel: #112236; --panel2: #16293F;
-          --line: rgba(232,238,245,0.10); --line2: rgba(232,238,245,0.18);
-          --txt: #E8EEF5; --txt2: #8DA3B8; --txt3: #5C7186;
+          --line: rgba(232,238,245,0.16); --line2: rgba(232,238,245,0.18);
+          --txt: #E8EEF5; --txt2: #A9BDD0; --txt3: #7E99B0;
           --acc: #3ECFE0; --warn: #FF5C4D; --ok: #4ADE80; --amber: #FFD166;
+          --warn-txt: #FFB4AC; --amber-txt: #F0D9A0; --acc-txt: #B8E8EF; --sw-brd: rgba(232,238,245,0.30);
           --fd: 'Space Grotesk', sans-serif; --fm: 'IBM Plex Mono', monospace;
         }
+        /* Cyanotype: white on saturated blue. Chrome sits a shade darker than
+           the drawing canvas (#12395E) so the drawing reads as the lit surface. */
+        :root[data-theme="blueprint"] {
+          --ink: #0E2F4E; --ink2: #12395E; --panel: #16456C; --panel2: #1B5180;
+          --line: rgba(255,255,255,0.18); --line2: rgba(255,255,255,0.24);
+          --txt: #F2F8FD; --txt2: #C3DCF0; --txt3: #9DC9E8;
+          --acc: #7FE3F0; --warn: #FF8A7A; --ok: #8BEBA8; --amber: #FFD98A;
+          --warn-txt: #FFC9C0; --amber-txt: #FFE3B0; --acc-txt: #C4F1F8; --sw-brd: rgba(255,255,255,0.38);
+        }
+        /* Paper: the print palette on screen. Accents are the darkened print
+           accents — the screen accents are far too light on white. */
+        :root[data-theme="paper"] {
+          --ink: #FFFFFF; --ink2: #F4F7FA; --panel: #FFFFFF; --panel2: #EDF2F7;
+          --line: rgba(16,42,67,0.16); --line2: rgba(16,42,67,0.22);
+          --txt: #102A43; --txt2: #41556A; --txt3: #5A6E82;
+          --acc: #0A6273; --warn: #C0392B; --ok: #1E7D3C; --amber: #7A5D16;
+          --warn-txt: #8A2A1E; --amber-txt: #6B5214; --acc-txt: #0A5C6C; --sw-brd: rgba(16,42,67,0.42);
+        }
+        /* ── Type scale and density ───────────────────────────────────────
+           Colour lives in the theme blocks above; SIZE lives here. Two sets,
+           one shape — the same technique, so a density is as cheap as a theme.
+
+           The rule the scale encodes: MONO for values and identifiers
+           (dimensions, model numbers, the status bar), SANS for prose (labels,
+           hints, descriptions). The blueprint character belongs on the data,
+           not on the chrome.
+
+           Tracking is deliberately low. The previous scale put 1.5–2.5px on
+           9px type — 17–28% of the em. Letterspacing aids uppercase to roughly
+           10% and costs legibility past it, so nothing here exceeds that.
+
+           --tap/--tap-sm are the iPadOS 44pt minimum. They shrink far less
+           than the type does in Compact: a control too small to hit reliably
+           is a defect at any density, not a preference. */
+        :root {
+          --fs-h1: 17px;   --fs-title: 11px;  --fs-label: 12px;  --fs-value: 16px;
+          --fs-body: 14px; --fs-stat: 12px;   --fs-hint: 11.5px; --fs-num: 20px;
+          --fs-btn: 11px;  --fs-chip: 10.5px; --fs-tag: 9.5px;
+          --tr-title: 1px; --tr-label: 0;     --tr-btn: 1px;
+          --tr-chip: 0.8px; --tr-tag: 1.6px;
+          --tap: 44px;     --tap-sm: 40px;
+          --sp-1: 6px; --sp-2: 10px; --sp-3: 14px; --sp-4: 20px; --sp-5: 24px;
+        }
+        :root[data-density="compact"] {
+          --fs-h1: 16px;   --fs-title: 10px;  --fs-label: 11px;  --fs-value: 15px;
+          --fs-body: 13px; --fs-stat: 11px;   --fs-hint: 10.5px; --fs-num: 18px;
+          --fs-btn: 10px;  --fs-chip: 9.5px;  --fs-tag: 9.5px;
+          --tap: 44px;     --tap-sm: 40px;
+          --sp-1: 4px; --sp-2: 7px; --sp-3: 10px; --sp-4: 14px; --sp-5: 18px;
+        }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        input[type="range"] { width: 100%; height: var(--tap); background: transparent; -webkit-appearance: none; appearance: none; margin: 0; }
+        input[type="range"]::-webkit-slider-runnable-track { height: 3px; background: var(--line2); border-radius: 2px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: var(--acc); border: none; margin-top: -9.5px; }
+        input[type="range"]::-moz-range-track { height: 3px; background: var(--line2); border-radius: 2px; }
+        input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--acc); border: none; }
+
         body { margin: 0; background: var(--ink); }
         .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--ink); color: var(--txt); font-family: var(--fd); }
         .hdr { display: flex; justify-content: space-between; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; gap: 10px; }
-        .hdr h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; margin: 0; }
-        .hdr .sub { font-family: var(--fm); font-size: 9px; letter-spacing: 2px; color: var(--txt3); margin-top: 2px; }
-        .hdr-proj { font-family: var(--fm); font-size: 11px; color: var(--txt2); }
-        .sec-title { font-family: var(--fm); font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--txt2); font-weight: 600; padding-bottom: 7px; border-bottom: 1px solid var(--line); margin-bottom: 12px; display: flex; align-items: center; gap: 7px; }
+        .hdr h1 { font-size: var(--fs-h1); font-weight: 700; letter-spacing: 0.3px; margin: 0; }
+        .hdr .sub { font-family: var(--fm); font-size: var(--fs-tag); letter-spacing: var(--tr-tag); color: var(--txt3); margin-top: 2px; }
+        .hdr-proj { font-family: var(--fm); font-size: var(--fs-stat); color: var(--txt2); }
+        .sec-title { font-family: var(--fm); font-size: var(--fs-title); letter-spacing: var(--tr-title); text-transform: uppercase; color: var(--txt2); font-weight: 600; padding: var(--sp-1) 0; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-2); min-height: var(--tap); display: flex; align-items: center; gap: 7px; }
         .sec-clk { cursor: pointer; user-select: none; -webkit-user-select: none; }
         .sec-clk:hover { color: var(--txt); }
         .sec-sum { flex: 1; min-width: 0; text-align: right; color: var(--txt3); letter-spacing: 0.5px; text-transform: none; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sec-chev { color: var(--txt3); transition: transform .15s; flex-shrink: 0; }
         .sec-chev.closed { transform: rotate(-90deg); }
-        .lbl { font-family: var(--fm); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--txt3); margin-bottom: 5px; }
-        .hint { font-family: var(--fm); font-size: 10px; color: var(--txt3); margin-top: 4px; line-height: 1.5; }
-        .inp { width: 100%; padding: 9px 11px; border: 1px solid var(--line2); background: var(--ink2); font-family: var(--fm); font-size: 15px; color: var(--txt); outline: none; border-radius: 4px; min-height: 42px; transition: border-color .15s; -webkit-appearance: none; appearance: none; }
+        .lbl { font-family: var(--fd); font-size: var(--fs-label); letter-spacing: var(--tr-label); color: var(--txt2); margin-bottom: var(--sp-1); }
+        .hint { font-family: var(--fd); font-size: var(--fs-hint); color: var(--txt3); margin-top: 4px; line-height: 1.5; }
+        .inp { width: 100%; padding: 9px 11px; border: 1px solid var(--line2); background: var(--ink2); font-family: var(--fm); font-size: var(--fs-value); color: var(--txt); outline: none; border-radius: 4px; min-height: var(--tap); transition: border-color .15s; -webkit-appearance: none; appearance: none; }
         .inp:focus { border-color: var(--acc); }
         select.inp { background-image: linear-gradient(45deg, transparent 50%, var(--txt2) 50%), linear-gradient(135deg, var(--txt2) 50%, transparent 50%); background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
-        .chk-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; font-size: 13.5px; min-height: 40px; user-select: none; -webkit-user-select: none; color: var(--txt); }
+        .chk-row { display: flex; align-items: center; gap: 10px; min-width: var(--tap); padding: 8px 0; cursor: pointer; font-size: var(--fs-body); min-height: var(--tap); user-select: none; -webkit-user-select: none; color: var(--txt); }
         .chk { width: 18px; height: 18px; border: 1.4px solid var(--line2); border-radius: 4px; background: var(--ink2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .15s; color: var(--ink); }
         .chk.on { background: var(--acc); border-color: var(--acc); }
         .seg { display: flex; background: var(--ink2); border: 1px solid var(--line2); border-radius: 5px; padding: 3px; gap: 3px; }
-        .seg-btn { flex: 1; padding: 8px 10px; border: none; background: transparent; color: var(--txt2); font-family: var(--fm); font-size: 11px; letter-spacing: 0.5px; cursor: pointer; border-radius: 3px; transition: all .15s; min-height: 34px; }
+        .seg-btn { flex: 1; padding: 8px 10px; border: none; background: transparent; color: var(--txt2); font-family: var(--fm); font-size: var(--fs-chip); letter-spacing: var(--tr-chip); cursor: pointer; border-radius: 3px; transition: all .15s; min-height: var(--tap); min-width: var(--tap); }
         .seg-btn.on { background: var(--panel2); color: var(--txt); box-shadow: inset 0 0 0 1px var(--line2); }
-        .seg.small .seg-btn { padding: 4px 8px; font-size: 9px; min-height: 24px; }
-        .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; font-family: var(--fm); color: var(--txt2); gap: 8px; }
+        .seg.small .seg-btn { padding: 4px 8px; font-size: var(--fs-chip); min-height: var(--tap); }
+        .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: var(--fs-stat); font-family: var(--fm); color: var(--txt2); gap: 8px; }
         .stat strong { color: var(--txt); font-weight: 600; }
         .stat.dim { opacity: 0.6; }
-        .warn-box { margin-top: 10px; padding: 9px 11px; background: rgba(255,92,77,0.08); border: 1px solid rgba(255,92,77,0.5); border-radius: 4px; color: #FFB4AC; font-family: var(--fm); font-size: 11px; line-height: 1.55; }
-        .warn-title { font-size: 9px; letter-spacing: 2px; color: var(--warn); margin-bottom: 4px; font-weight: 700; }
-        .note-box { margin-top: 8px; padding: 8px 10px; background: rgba(255,209,102,0.07); border: 1px solid rgba(255,209,102,0.4); border-radius: 4px; color: #F0D9A0; font-family: var(--fm); font-size: 10px; line-height: 1.5; }
-        .rec-box { margin-top: 8px; padding: 9px 11px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 4px; font-family: var(--fm); font-size: 11px; line-height: 1.5; color: var(--txt); }
-        .rec-tag { font-size: 8px; letter-spacing: 2px; color: var(--acc); margin-bottom: 3px; font-weight: 700; }
-        .vesa-box { margin-top: 8px; padding: 9px 11px; background: rgba(255,209,102,0.06); border: 1px solid rgba(255,209,102,0.35); border-radius: 4px; font-family: var(--fm); font-size: 11px; line-height: 1.5; color: #F0D9A0; }
+        .warn-box { margin-top: 10px; padding: 9px 11px; background: rgba(255,92,77,0.08); border: 1px solid rgba(255,92,77,0.5); border-radius: 4px; color: var(--warn-txt); font-family: var(--fm); font-size: var(--fs-hint); line-height: 1.55; }
+        .warn-title { font-size: var(--fs-tag); letter-spacing: var(--tr-tag); color: var(--warn); margin-bottom: 4px; font-weight: 700; }
+        .note-box { margin-top: 8px; padding: 8px 10px; background: rgba(255,209,102,0.07); border: 1px solid rgba(255,209,102,0.4); border-radius: 4px; color: var(--amber-txt); font-family: var(--fm); font-size: var(--fs-hint); line-height: 1.5; }
+        .rec-box { margin-top: 8px; padding: 9px 11px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 4px; font-family: var(--fm); font-size: var(--fs-hint); line-height: 1.5; color: var(--txt); }
+        .rec-tag { font-size: var(--fs-tag); letter-spacing: var(--tr-tag); color: var(--acc); margin-bottom: 3px; font-weight: 700; }
+        .vesa-box { margin-top: 8px; padding: 9px 11px; background: rgba(255,209,102,0.06); border: 1px solid rgba(255,209,102,0.35); border-radius: 4px; font-family: var(--fm); font-size: var(--fs-hint); line-height: 1.5; color: var(--amber-txt); }
         .vesa-box .rec-tag { color: var(--amber); }
         .size-strip-wrap { width: 100%; }
         .size-strip-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .strip-title { font-family: var(--fm); font-size: 10px; letter-spacing: 2px; color: var(--txt2); font-weight: 600; }
+        .strip-title { font-family: var(--fm); font-size: var(--fs-tag); letter-spacing: var(--tr-tag); color: var(--txt2); font-weight: 600; }
         .size-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
         .size-card { min-width: 68px; padding: 10px 8px; border: 1px solid var(--line2); border-radius: 5px; background: var(--panel); cursor: pointer; text-align: center; transition: all .15s; flex-shrink: 0; }
         .size-card:hover { border-color: var(--acc); }
@@ -9057,56 +10075,85 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .size-card.warn { border-style: dashed; opacity: 0.75; }
         .size-card.warn .size-sub { color: var(--warn); }
         .size-card.on .size-sub { color: var(--ink); opacity: 0.7; }
-        .size-num { font-family: var(--fd); font-size: 20px; font-weight: 700; line-height: 1; }
-        .size-sub { font-family: var(--fm); font-size: 7px; letter-spacing: 1.5px; margin-top: 4px; color: var(--txt3); }
-        .chip { padding: 4px 10px; border: 1px solid var(--line2); background: transparent; color: var(--txt2); font-family: var(--fm); font-size: 9px; letter-spacing: 1px; cursor: pointer; border-radius: 3px; transition: all .15s; }
+        .size-num { font-family: var(--fd); font-size: var(--fs-num); font-weight: 700; line-height: 1; }
+        .size-sub { font-family: var(--fm); font-size: var(--fs-tag); letter-spacing: var(--tr-tag); margin-top: 4px; color: var(--txt3); }
+        .chip { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line2); background: transparent; color: var(--txt2); font-family: var(--fm); font-size: var(--fs-chip); letter-spacing: var(--tr-chip); cursor: pointer; border-radius: 3px; min-height: var(--tap); min-width: var(--tap); transition: all .15s; }
         .chip.on, .chip:hover:not(:disabled) { border-color: var(--acc); color: var(--acc); }
         .chip:disabled { opacity: 0.3; cursor: not-allowed; }
 
         /* markup toolbar — sits directly over the drawing so tools are a thumb away */
         .mk-bar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 0 0 9px; margin-bottom: 9px; border-bottom: 1px solid var(--line); }
-        .mk-bar .chip { min-height: 30px; }
         .mk-sep { width: 1px; align-self: stretch; background: var(--line2); margin: 2px 4px; }
-        .mk-sw { width: 22px; height: 22px; border-radius: 3px; border: 2px solid var(--line2); cursor: pointer; padding: 0; }
+        .mk-sw { position: relative; width: var(--tap); height: var(--tap); border-radius: 3px; border: 2px solid var(--sw-brd); cursor: pointer; padding: 0; }
         .mk-sw.on { border-color: var(--acc); box-shadow: 0 0 0 2px var(--ink2), 0 0 0 3px var(--acc); }
+        /* A colour that will vanish on the export sheet, or against this theme.
+           A dot, not a slash across the chip: the swatch still has to read as
+           the colour it paints — the mark is a caution, not a prohibition. */
+        .mk-sw.risky::after { content: ""; position: absolute; right: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 1.5px solid var(--ink2); pointer-events: none; }
+        .mk-sw.sm.risky::after { right: -3px; top: -3px; width: 6px; height: 6px; border-width: 1px; }
         /* iPhone/iPad safe areas — the app fills the screen when installed to
            the Home Screen or running in the native shell. */
         .hdr { padding-left: max(18px, env(safe-area-inset-left)); padding-right: max(18px, env(safe-area-inset-right)); padding-top: max(14px, env(safe-area-inset-top)); }
-        .sidebar { padding-left: max(14px, env(safe-area-inset-left)); }
-        .main-col { padding-right: max(14px, env(safe-area-inset-right)); }
+        .sidebar { padding-left: max(var(--sp-4), env(safe-area-inset-left)); }
+        .main-col { padding-right: max(var(--sp-3), env(safe-area-inset-right)); }
         .status-bar { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
         .tab-bar { padding-bottom: max(0px, calc(env(safe-area-inset-bottom) / 2)); }
 
         /* ---- narrative flow: stage headings, start panel, drop target ---- */
+        @media (max-width: 767px) {
+          .mk-bar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+          .mk-bar::-webkit-scrollbar { display: none; }
+          .mk-bar > * { flex: 0 0 auto; }
+        }
+        .stg { border-bottom: 1px solid var(--line); }
+        .stg:last-of-type { border-bottom: none; }
+        .stg-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--tap);
+                    padding: var(--sp-2) 0; background: transparent; border: none; cursor: pointer; text-align: left; color: inherit; }
+        .stg-head .stage-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .stg:not(.on) .stg-head .stage-name { color: var(--txt3); }
+        .stg-head:hover .stage-name { color: var(--acc); }
+        .stg-body { padding-bottom: var(--sp-3); }
+        .stg-all { margin-top: var(--sp-4); display: flex; justify-content: center; }
         .stage { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
                  margin: 20px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
         .stage:first-child { margin-top: 2px; }
-        .stage-name { font-family: var(--fm); font-size: 9px; letter-spacing: 2.5px; font-weight: 700; color: var(--acc); }
-        .stage-note { font-size: 9.5px; color: var(--txt2); opacity: 0.75; }
-        .menu-note { padding: 8px 12px; font-size: 9.5px; color: var(--txt2); opacity: 0.8; }
+        .stage-name { font-family: var(--fm); font-size: var(--fs-tag); letter-spacing: var(--tr-tag); font-weight: 700; color: var(--acc); }
+        .stage-note { font-size: var(--fs-hint); color: var(--txt2); opacity: 0.75; }
+        .menu-note { padding: 8px 12px; font-size: var(--fs-hint); color: var(--txt2); opacity: 0.8; }
         .startp { border: 1px solid var(--line2); border-radius: 6px; padding: 14px; margin-bottom: 12px; background: var(--ink2); }
         .startp-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 12px; }
         .startc { text-align: left; padding: 11px 12px; border: 1px solid var(--line2); border-radius: 5px;
                   background: transparent; cursor: pointer; transition: all .15s; display: block; }
         .startc:hover { border-color: var(--acc); background: rgba(62,207,224,0.05); }
-        .startc strong { display: block; color: var(--txt); font-size: 12px; margin-bottom: 3px; }
-        .startc span { display: block; color: var(--txt2); font-size: 10px; line-height: 1.45; }
+        .startc strong { display: block; color: var(--txt); font-size: var(--fs-body); margin-bottom: 3px; }
+        .startc span { display: block; color: var(--txt2); font-size: var(--fs-hint); line-height: 1.45; }
         .main-col.dropping { outline: 2px dashed var(--acc); outline-offset: -6px; border-radius: 6px; }
 
-        .btn.icon-btn { padding: 9px 12px; font-size: 14px; line-height: 1; }
+        .btn.icon-btn { padding: 0 var(--sp-3); min-height: var(--tap); min-width: var(--tap); font-size: 14px; line-height: 1; }
         .style-btn { display: inline-flex; align-items: center; gap: 6px; }
         .mk-sw.sm { width: 13px; height: 13px; border-width: 1px; }
+        /* Markup that will not survive the export sheet. Tinted like .warn-box
+           rather than solid: it is a caution beside a working button, not an
+           error state, and it must not read as "export is broken". */
+        .ink-warn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; background: rgba(255,92,77,0.10); border: 1px solid var(--warn); border-radius: 5px; color: var(--warn-txt); font-family: var(--fm); font-size: 10px; letter-spacing: 1px; font-weight: 700; cursor: pointer; }
+        .ink-warn:hover { background: rgba(255,92,77,0.18); }
+        .ink-list { margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; max-height: 168px; overflow-y: auto; }
+        .ink-row { display: flex; align-items: center; gap: 9px; padding: 6px 9px; border-bottom: 1px solid var(--line); font-family: var(--fm); font-size: 11px; }
+        .ink-row:last-child { border-bottom: none; }
+        .ink-chip { flex: 0 0 auto; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--sw-brd); }
+        .ink-name { flex: 1 1 auto; color: var(--txt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ink-hex { flex: 0 0 auto; color: var(--txt3); font-size: 10px; letter-spacing: 0.5px; }
 
         /* ---- settings panel ---- */
         .setp { background: var(--ink2); border: 1px solid var(--line2); border-radius: 8px; padding: 16px;
                 width: min(460px, 100%); max-height: 86vh; overflow-y: auto; }
-        .set-group { font-family: var(--fm); font-size: 8.5px; letter-spacing: 2.5px; font-weight: 700; color: var(--acc);
+        .set-group { font-family: var(--fm); font-size: var(--fs-tag); letter-spacing: var(--tr-tag); font-weight: 700; color: var(--acc);
                      margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
         .set-group:first-of-type { margin-top: 6px; }
         .set-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); }
         .set-row:last-child { border-bottom: none; }
-        .set-label { font-size: 12px; color: var(--txt); }
-        .set-hint { font-size: 10px; color: var(--txt2); margin-top: 2px; line-height: 1.4; }
+        .set-label { font-size: var(--fs-label); color: var(--txt); }
+        .set-hint { font-size: var(--fs-hint); color: var(--txt2); margin-top: 2px; line-height: 1.4; }
         .set-ctl { flex-shrink: 0; }
 
         /* ---- catalog data screen ---- */
@@ -9130,12 +10177,12 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .dgrid tr.rowbad td { background: rgba(255,92,77,0.07); }
         .dunit { opacity: 0.55; text-transform: none; letter-spacing: 0; }
         .dkey { color: var(--txt); font-weight: 600; white-space: nowrap; }
-        .dcell { width: 92px; padding: 5px 6px; background: var(--ink); border: 1px solid var(--line2); border-radius: 3px;
+        .dcell { width: 92px; padding: 4px 6px; min-height: var(--tap-sm); background: var(--ink); border: 1px solid var(--line2); border-radius: 3px;
                  color: var(--txt); font-family: var(--fm); font-size: 11px; }
         .dcell.wide { width: 100%; min-width: 260px; }
         .dcell:focus { border-color: var(--acc); outline: none; }
         .dcell.bad { border-color: var(--warn); color: var(--warn); }
-        .derr { color: var(--warn); font-size: 9.5px; margin-top: 3px; }
+        .derr { color: var(--warn); font-size: var(--fs-hint); margin-top: 3px; }
         .dact { white-space: nowrap; display: flex; gap: 4px; }
         .dtag { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 3px; font-size: 8px; letter-spacing: 1px; font-weight: 700; }
         .dtag.edited { background: var(--amber); color: var(--ink); }
@@ -9149,50 +10196,50 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
         .ask-wrap { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 900; padding: 20px; }
         .ask { background: var(--ink2); border: 1px solid var(--acc); border-radius: 6px; padding: 16px; width: min(340px, 100%); }
         .canvas-panel { background: var(--ink2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        .import-note { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; background: rgba(62,207,224,0.07); border: 1px solid rgba(62,207,224,0.4); border-radius: 5px; font-family: var(--fm); color: #B8E8EF; line-height: 1.5; }
+        .import-note { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; background: rgba(62,207,224,0.07); border: 1px solid rgba(62,207,224,0.4); border-radius: 5px; font-family: var(--fm); color: var(--acc-txt); line-height: 1.5; }
         .menu-wrap { position: relative; }
         .menu-backdrop { position: fixed; inset: 0; z-index: 79; }
         .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 290px; background: var(--panel); border: 1px solid var(--line2); border-radius: 6px; padding: 6px; z-index: 80; box-shadow: 0 14px 44px rgba(0,0,0,0.55); }
-        .menu-item { display: block; width: 100%; text-align: left; padding: 9px 12px; background: transparent; border: none; color: var(--txt); font-family: var(--fm); font-size: 11.5px; letter-spacing: 0.5px; cursor: pointer; border-radius: 4px; }
+        .menu-item { display: block; width: 100%; text-align: left; padding: 9px 12px; background: transparent; border: none; color: var(--txt); font-family: var(--fm); font-size: var(--fs-btn); letter-spacing: var(--tr-btn); cursor: pointer; border-radius: 4px; min-height: var(--tap); }
         .menu-item:hover { background: var(--panel2); }
         .menu-item.primary { color: var(--acc); font-weight: 700; }
-        .menu-sub { display: block; font-size: 9px; color: var(--txt3); letter-spacing: 0.3px; margin-top: 2px; font-weight: 400; }
+        .menu-sub { display: block; font-size: var(--fs-hint); color: var(--txt3); letter-spacing: 0.3px; margin-top: 2px; font-weight: 400; }
         .menu-sep { height: 1px; background: var(--line); margin: 5px 4px; }
         .status-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; flex-wrap: wrap; }
-        .status-vals { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--fm); font-size: 11px; }
+        .status-vals { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--fm); font-size: var(--fs-stat); }
         .sv { color: var(--txt); white-space: nowrap; }
-        .sv em { font-style: normal; color: var(--txt3); font-size: 9px; letter-spacing: 1px; margin-right: 3px; }
+        .sv em { font-style: normal; color: var(--txt3); font-size: var(--fs-tag); letter-spacing: var(--tr-chip); margin-right: 3px; }
         .dim-sv { color: var(--txt3); letter-spacing: 1.5px; font-size: 10px; }
         .status-right { display: flex; gap: 8px; align-items: center; }
-        .diag-badge { font-family: var(--fm); font-size: 10px; padding: 4px 9px; border-radius: 3px; border: 1px solid; cursor: pointer; background: transparent; }
-        .diag-badge.ok { color: var(--ok); border-color: rgba(74,222,128,0.5); }
-        .diag-badge.bad { color: var(--warn); border-color: rgba(255,92,77,0.6); }
+        .diag-badge { font-family: var(--fm); font-size: var(--fs-tag); padding: 0 var(--sp-2); min-height: var(--tap-sm); border-radius: 3px; border: 1px solid; cursor: pointer; background: transparent; }
+        .diag-badge.ok { color: var(--ok); border-color: currentColor; }
+        .diag-badge.bad { color: var(--warn); border-color: currentColor; }
         .diag-panel { position: fixed; right: 14px; bottom: 14px; width: min(520px, calc(100vw - 28px)); max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line2); border-radius: 6px; padding: 12px; z-index: 60; box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
         .diag-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--fm); font-size: 10px; letter-spacing: 2px; color: var(--txt2); margin-bottom: 10px; }
         .diag-group { font-family: var(--fm); font-size: 9px; letter-spacing: 2px; color: var(--txt3); margin: 10px 0 4px; }
-        .diag-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-family: var(--fm); font-size: 10px; color: var(--txt2); border-bottom: 1px solid var(--line); }
+        .diag-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-family: var(--fm); font-size: var(--fs-hint); color: var(--txt2); border-bottom: 1px solid var(--line); }
         .diag-row.head-row { color: var(--txt); }
         .diag-row .p { color: var(--ok); }
         .diag-row .f { color: var(--warn); }
-        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border: 1px solid var(--acc); background: var(--acc); color: var(--ink); font-family: var(--fm); font-size: 10px; letter-spacing: 1.5px; font-weight: 600; cursor: pointer; border-radius: 4px; min-height: 38px; transition: all .15s; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border: 1px solid var(--acc); background: var(--acc); color: var(--ink); font-family: var(--fm); font-size: var(--fs-btn); letter-spacing: var(--tr-btn); font-weight: 600; cursor: pointer; border-radius: 4px; min-height: var(--tap); transition: all .15s; }
         .btn:hover:not(:disabled) { filter: brightness(1.1); }
         .btn:disabled { opacity: 0.35; cursor: not-allowed; }
         .btn.ghost { background: transparent; color: var(--txt2); border-color: var(--line2); }
         .btn.ghost:hover:not(:disabled) { color: var(--txt); border-color: var(--txt2); filter: none; }
         .tab-bar { display: flex; border-bottom: 1px solid var(--line); background: var(--ink2); position: sticky; top: 0; z-index: 10; }
-        .tab { flex: 1; padding: 13px 8px; border: none; background: transparent; border-bottom: 2px solid transparent; font-family: var(--fm); font-size: 10px; letter-spacing: 2px; cursor: pointer; color: var(--txt3); font-weight: 600; }
+        .tab { flex: 1; padding: 0 8px; min-height: var(--tap); border: none; background: transparent; border-bottom: 2px solid transparent; font-family: var(--fm); font-size: var(--fs-btn); letter-spacing: var(--tr-tag); cursor: pointer; color: var(--txt3); font-weight: 600; }
         .tab.on { color: var(--txt); border-bottom-color: var(--acc); }
         .sidebar { border-right: 1px solid var(--line); padding: 20px; overflow-y: auto; background: var(--ink); }
-        .main-col { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-y: auto; }
+        .main-col { padding: var(--sp-3); display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-y: auto; }
         .toggle-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .strip-sep { width: 1px; height: 16px; background: var(--line2); margin: 0 4px; }
         .legend-box { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line2); border-radius: 5px; }
         .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 18px; margin-top: 6px; }
-        .legend-row { display: flex; gap: 8px; font-family: var(--fm); font-size: 10.5px; color: var(--txt2); padding: 2px 0; }
+        .legend-row { display: flex; gap: 8px; font-family: var(--fm); font-size: var(--fs-hint); color: var(--txt2); padding: 2px 0; }
         .legend-abbr { color: var(--acc); font-weight: 700; min-width: 68px; flex-shrink: 0; }
         .mini-preview { position: sticky; top: -20px; z-index: 30; margin: -20px -20px 16px; padding: 10px 14px 7px; background: var(--ink); border-bottom: 1px solid var(--line2); cursor: pointer; }
         .mini-preview svg { display: block; width: 100%; height: auto; max-height: 130px; }
-        .mini-tag { font-family: var(--fm); font-size: 8px; letter-spacing: 1.5px; color: var(--txt3); text-align: center; margin-top: 4px; }
+        .mini-tag { font-family: var(--fm); font-size: var(--fs-tag); letter-spacing: var(--tr-tag); color: var(--txt3); text-align: center; margin-top: 4px; }
         input[type="number"] { -moz-appearance: textfield; }
         input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         ::-webkit-scrollbar { height: 8px; width: 8px; }
@@ -9232,7 +10279,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
   }, "SPECS")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: isMobile ? "1fr" : isTablet ? "290px 1fr" : "320px 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : isTablet ? "300px 1fr" : isWide ? "380px 1fr" : "336px 1fr",
       flex: 1,
       minHeight: 0
     }
@@ -9271,7 +10318,7 @@ body { font-family: 'Space Grotesk', -apple-system, sans-serif; color: #102A43; 
       setDragOver(false);
       routeFiles(e.dataTransfer && e.dataTransfer.files);
     }
-  }, importBanner, startPanel, sizeStrip, legendPanel, canvas, askDialog, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
+  }, importBanner, startPanel, sizeStrip, legendPanel, canvas, askDialog, inkDialog, statusBar, isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "center",
