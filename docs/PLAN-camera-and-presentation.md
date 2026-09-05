@@ -1,6 +1,7 @@
 # Plan — Camera capture & presentation view
 
-Status: **designed, not built.** Agreed in planning 2026-09-04.
+Status: **Part 1 built in v3.0.0.** Part 2 (presentation view) still open.
+Agreed in planning 2026-09-04.
 
 ## Why
 
@@ -147,3 +148,44 @@ finished rooms.
   pre-drywall where a door is only a rough opening
 - Whether the known-object path needs a position tap or whether dragging with the
   existing snapping is good enough. A feel question; answer it after one use.
+
+
+---
+
+## Built — v3.0.0 (Part 1)
+
+Camera capture needed **no native code**: `<input type="file" accept="image/*"
+capture="environment">` opens the rear camera directly. The same realisation as
+dictation — the platform already does it, so there is no bridge, no permission
+string and no change to the "no network at any point" claim.
+
+Rectification is `solveHomography` / `planRectify` / `rectifyBitmap`, all pure
+except the last (which needs a canvas). Verified as the plan specified: a known
+flat elevation pushed through a **known** homography, rectified, and the
+dimensions asserted back — plus an end-to-end run through the real UI where a
+synthetic oblique photo of a 32" × 80" door came back measuring 32.51" × 80.43",
+with the residual accounted for by the drawn outline's own 0.78" thickness.
+
+Interior points are what the corner test actually checks: four corners exactly
+determine H, so corners matching is trivially true and proves nothing.
+
+### Found while building
+
+The file inputs lived **inside** the collapsible Reference Drawing section, so
+`ref.current` was null whenever it was collapsed — which the v2.7.0 stage
+stepper made the normal state. Every entry point that calls `.click()` on those
+refs (the IMPORT menu, the start card) silently did nothing. They are now
+mounted at the always-rendered header level. Worth remembering: a ref into a
+conditionally-rendered subtree is a null waiting to happen.
+
+The crop is dropped on rectify — it was expressed against the old pixel grid and
+would cut the wrong region out of the squared-up image.
+
+### Still open from Part 1
+
+- Position after rectify is still a drag. Scale is true; the reference's
+  real-world position on the wall is not knowable from the photo alone. The
+  plan's open question — whether the known-object path needs a position tap —
+  is now answerable after one real use.
+- Wall-corner path with a derived camera height is NOT built. Only references
+  with both dimensions known are offered, which is the safe subset.

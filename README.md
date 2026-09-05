@@ -86,6 +86,25 @@ It is a deterministic grammar, not a model: it runs in any browser and in the
 Simulator, needs no Apple Intelligence hardware, and is pinned by 14 self-tests.
 Dictation is an input method, not a feature — there is no speech code in the app.
 
+**Photograph the wall.** `IMPORT ▾ → PHOTOGRAPH THE WALL` opens the camera
+directly — no native code, the same trick as keyboard dictation. Most jobs are
+retrofits in finished homes where cabinets, mantel and millwork are already
+there and none of it is in a drawing.
+
+**Then square up the perspective.** A photo of a wall is a trapezoid, not an
+elevation — you never shoot square-on, and two-point calibration on a trapezoid
+is right in one spot and progressively wrong everywhere else. On a tool people
+drill from that is the worst kind of bug, because nothing looks broken.
+`PDF ▾ → SQUARE UP A PHOTO` takes four taps on something of known size (the TV
+already on the wall, a door, a drywall sheet, or your own dimensions) and
+resamples the bitmap through a real homography. Both dimensions are required:
+four corners of an unknown rectangle fit infinitely many shapes.
+
+It warns when the shot is too oblique (the far edge is rebuilt from too few
+pixels) or the reference is too small a fraction of the frame (tap error
+multiplies across the wall). Scale comes out true; position is still yours to
+drag.
+
 **Tape-out is a checklist.** In the Tape-out view the four numbers you snap on
 the wall get tick boxes — on the drawing and in a panel below it. Ticking dims
 that label so what still reads at full strength is what is left to do. Ticks
