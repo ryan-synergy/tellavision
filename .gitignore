@@ -7,3 +7,4 @@ ios/**/xcuserdata/
 ios/**/*.xcworkspace/xcuserdata/
 DerivedData/
 dist/
+Thumbs.db
